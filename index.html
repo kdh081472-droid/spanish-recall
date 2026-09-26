@@ -20,7 +20,8 @@
 <body>
 <div id="root"><div id="boot">불러오는 중…</div></div>
 
-<!-- 데이터 칸: 이 파일 자체에 문장·진도가 저장됩니다. 손으로 건드리지 마세요. -->
+<!-- 데이터 칸: 이 파일 자체에 문장·진도가 저장됩니다. 손으로 건드리지 마세요.
+     (Claude API 키는 여기 포함되지 않고 이 브라우저에만 별도로 저장됩니다.) -->
 <script type="application/json" id="recall-seed">{}</script>
 
 <script>/**
@@ -336,9 +337,10 @@ window.__recallSaveHelpers = {
     if (!m) return null;
     try { return JSON.parse(m[2]); } catch (e) { return null; }
   },
-  buildFullHtml: function (cards, target) {
+  buildFullHtml: function (cards, meta) {
     if (!__SEED_RE.test(__PRISTINE_HTML)) return null;
-    var seedJson = JSON.stringify({ cards: cards, target: target }).split("</").join("<\\/");
+    var payload = Object.assign({ cards: cards }, meta || {});
+    var seedJson = JSON.stringify(payload).split("</").join("<\\/");
     return "<!DOCTYPE html>\n" + __PRISTINE_HTML.replace(__SEED_RE, function (_, a, _b, c) { return a + seedJson + c; });
   },
 };
@@ -381,6 +383,8 @@ const S_MAX = 365;
 const FUZZ = 0.05;
 const MATURE_S = 21;
 const TARGETS = [[0.85, "느슨", "덜 자주, 리뷰 부담 최소"], [0.9, "표준", "일반적인 학습 기본값"], [0.92, "탄탄", "확실히 붙이고 싶을 때"], [0.95, "반사적", "툭 치면 툭 나오게"]];
+const GOALS = [[5, "가볍게"], [10, "표준"], [15, "탄탄히"], [20, "몰아서"]];
+const todayStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const KEY_V3 = "recall:cards:v3";
 const KEY_V2 = "recall:cards:v2";
 const KEY_V1 = "recall:cards:v1";
@@ -447,7 +451,10 @@ function parseImportedText(text) {
   if (!cards) throw new Error("형식을 알 수 없는 파일이에요.");
   return {
     cards: cards.map(migrate),
-    target: typeof obj.target === "number" ? obj.target : null
+    target: typeof obj.target === "number" ? obj.target : null,
+    dailyGoal: typeof obj.dailyGoal === "number" ? obj.dailyGoal : null,
+    streak: typeof obj.streak === "number" ? obj.streak : null,
+    lastGoalDate: typeof obj.lastGoalDate === "string" ? obj.lastGoalDate : null
   };
 }
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -578,6 +585,10 @@ function retentionNow(c) {
 function App() {
   const [cards, setCards] = useState([]);
   const [target, setTarget] = useState(0.9);
+  const [dailyGoal, setDailyGoalState] = useState(10);
+  const [streak, setStreak] = useState(0);
+  const [lastGoalDate, setLastGoalDate] = useState(null);
+  const [celebrate, setCelebrate] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");
   const [tab, setTab] = useState("study");
@@ -602,13 +613,22 @@ function App() {
         if (seed && Array.isArray(seed.cards) && seed.cards.length) {
           setCards(seed.cards.map(migrate));
           if (typeof seed.target === "number") setTarget(seed.target);
+          if (typeof seed.dailyGoal === "number") setDailyGoalState(seed.dailyGoal);
+          if (typeof seed.streak === "number") setStreak(seed.streak);
+          if (typeof seed.lastGoalDate === "string") setLastGoalDate(seed.lastGoalDate);
           setLoaded(true);
           return;
         }
       }
       try {
         const s = await window.storage.get(KEY_SET);
-        if (s?.value) setTarget(JSON.parse(s.value).target ?? 0.9);
+        if (s?.value) {
+          const parsed = JSON.parse(s.value);
+          setTarget(parsed.target ?? 0.9);
+          if (typeof parsed.dailyGoal === "number") setDailyGoalState(parsed.dailyGoal);
+          if (typeof parsed.streak === "number") setStreak(parsed.streak);
+          if (typeof parsed.lastGoalDate === "string") setLastGoalDate(parsed.lastGoalDate);
+        }
       } catch (e) {}
       for (const [key, isV3] of [[KEY_V3, true], [KEY_V2, false], [KEY_V1, false]]) {
         try {
@@ -643,9 +663,9 @@ function App() {
       } catch (e) {}
     })();
   }, []);
-  const writeSelfFile = useCallback(async (handle, nextCards, nextTarget) => {
+  const writeSelfFile = useCallback(async (handle, nextCards, meta) => {
     if (!handle || !SELF_SAVE) return;
-    const html = window.__recallSaveHelpers.buildFullHtml(nextCards, nextTarget);
+    const html = window.__recallSaveHelpers.buildFullHtml(nextCards, meta);
     if (!html) {
       setFileStatus("error");
       setFileMsg("이 파일에서 저장 위치를 찾지 못했어요.");
@@ -670,17 +690,36 @@ function App() {
     } catch (e) {
       setErr("저장에 실패했어요. 잠시 후 다시 시도해 주세요.");
     }
-    if (fileHandle && fileStatus === "connected") writeSelfFile(fileHandle, next, target);
-  }, [fileHandle, fileStatus, target, writeSelfFile]);
-  const saveTarget = useCallback(async t => {
-    setTarget(t);
+    if (fileHandle && fileStatus === "connected") writeSelfFile(fileHandle, next, {
+      target,
+      dailyGoal,
+      streak,
+      lastGoalDate
+    });
+  }, [fileHandle, fileStatus, target, dailyGoal, streak, lastGoalDate, writeSelfFile]);
+  const persistMeta = useCallback(async patch => {
+    const next = {
+      target,
+      dailyGoal,
+      streak,
+      lastGoalDate,
+      ...patch
+    };
+    setTarget(next.target);
+    setDailyGoalState(next.dailyGoal);
+    setStreak(next.streak);
+    setLastGoalDate(next.lastGoalDate);
     try {
-      await window.storage.set(KEY_SET, JSON.stringify({
-        target: t
-      }));
+      await window.storage.set(KEY_SET, JSON.stringify(next));
     } catch (e) {}
-    if (fileHandle && fileStatus === "connected") writeSelfFile(fileHandle, cards, t);
-  }, [fileHandle, fileStatus, cards, writeSelfFile]);
+    if (fileHandle && fileStatus === "connected") writeSelfFile(fileHandle, cards, next);
+  }, [target, dailyGoal, streak, lastGoalDate, fileHandle, fileStatus, cards, writeSelfFile]);
+  const saveTarget = useCallback(t => persistMeta({
+    target: t
+  }), [persistMeta]);
+  const saveDailyGoal = useCallback(g => persistMeta({
+    dailyGoal: g
+  }), [persistMeta]);
   const connectSelfFile = useCallback(async () => {
     if (!FS_SUPPORTED) return;
     try {
@@ -709,12 +748,17 @@ function App() {
       setFileHandle(handle);
       setFileName(handle.name);
       setFileStatus("connected");
-      await writeSelfFile(handle, cards, target);
+      await writeSelfFile(handle, cards, {
+        target,
+        dailyGoal,
+        streak,
+        lastGoalDate
+      });
       setFileMsg("이 파일 하나에 연결했어요. 이제부터 여기에 자동 저장돼요.");
     } catch (e) {
       if (e?.name !== "AbortError") setFileMsg("연결하지 못했어요.");
     }
-  }, [cards, target, writeSelfFile]);
+  }, [cards, target, dailyGoal, streak, lastGoalDate, writeSelfFile]);
   const reconnectSelfFile = useCallback(async () => {
     if (!fileHandle) return;
     try {
@@ -740,7 +784,12 @@ function App() {
   }, []);
   const downloadSelfFile = useCallback(() => {
     if (!SELF_SAVE) return;
-    const html = window.__recallSaveHelpers.buildFullHtml(cards, target);
+    const html = window.__recallSaveHelpers.buildFullHtml(cards, {
+      target,
+      dailyGoal,
+      streak,
+      lastGoalDate
+    });
     if (!html) {
       setFileMsg("파일을 만들지 못했어요.");
       return;
@@ -757,21 +806,37 @@ function App() {
     a.remove();
     URL.revokeObjectURL(url);
     setFileMsg("데이터가 담긴 파일을 다운로드했어요. 기존 파일을 이걸로 바꿔주세요.");
-  }, [cards, target]);
+  }, [cards, target, dailyGoal, streak, lastGoalDate]);
   const importFile = useCallback(async file => {
     try {
       const text = await file.text();
       const {
         cards: loadedCards,
-        target: loadedTarget
+        target: loadedTarget,
+        dailyGoal: loadedGoal,
+        streak: loadedStreak,
+        lastGoalDate: loadedLGD
       } = parseImportedText(text);
       persist(loadedCards);
-      if (loadedTarget != null) saveTarget(loadedTarget);
+      persistMeta({
+        ...(loadedTarget != null ? {
+          target: loadedTarget
+        } : {}),
+        ...(loadedGoal != null ? {
+          dailyGoal: loadedGoal
+        } : {}),
+        ...(loadedStreak != null ? {
+          streak: loadedStreak
+        } : {}),
+        ...(loadedLGD != null ? {
+          lastGoalDate: loadedLGD
+        } : {})
+      });
       setFileMsg(`가져왔어요 (${loadedCards.length}개).`);
     } catch (e) {
       setFileMsg("가져오기 실패: " + (e?.message || "형식을 확인해 주세요."));
     }
-  }, [persist, saveTarget]);
+  }, [persist, persistMeta]);
   const dueCards = useMemo(() => cards.filter(c => c.due <= now).sort((a, b) => a.due - b.due), [cards, now]);
   const doneToday = useMemo(() => {
     const d = new Date();
@@ -780,6 +845,21 @@ function App() {
     return cards.filter(c => c.reviewedAt >= t0).length;
   }, [cards, now]);
   const mature = cards.filter(c => c.S >= MATURE_S).length;
+  useEffect(() => {
+    if (!loaded || doneToday < dailyGoal) return;
+    const today = todayStr();
+    if (lastGoalDate === today) return;
+    const yesterday = todayStr(new Date(Date.now() - DAY));
+    const nextStreak = lastGoalDate === yesterday ? streak + 1 : 1;
+    persistMeta({
+      streak: nextStreak,
+      lastGoalDate: today
+    });
+    setCelebrate({
+      streak: nextStreak
+    });
+  }, [doneToday, dailyGoal, loaded]);
+  const dismissCelebrate = useCallback(() => setCelebrate(null), []);
   return React.createElement("div", {
     className: "rc-root"
   }, React.createElement(StyleTag, null), React.createElement("header", {
@@ -810,7 +890,12 @@ function App() {
     now: now,
     target: target,
     persist: persist,
-    goAdd: () => setTab("add")
+    goAdd: () => setTab("add"),
+    dailyGoal: dailyGoal,
+    doneToday: doneToday,
+    streak: streak,
+    celebrate: celebrate,
+    onDismissCelebrate: dismissCelebrate
   }) : tab === "add" ? React.createElement(Add, {
     cards: cards,
     persist: persist
@@ -821,6 +906,9 @@ function App() {
   }) : React.createElement(Settings, {
     target: target,
     saveTarget: saveTarget,
+    dailyGoal: dailyGoal,
+    saveDailyGoal: saveDailyGoal,
+    streak: streak,
     cards: cards,
     mature: mature,
     selfSave: SELF_SAVE,
@@ -843,7 +931,12 @@ function Study({
   now,
   target,
   persist,
-  goAdd
+  goAdd,
+  dailyGoal,
+  doneToday,
+  streak,
+  celebrate,
+  onDismissCelebrate
 }) {
   const [revealed, setRevealed] = useState(false);
   const [aheadId, setAheadId] = useState(null);
@@ -866,21 +959,35 @@ function Study({
   }, "문장 추가하러 가기"));
   if (!card) {
     const upcoming = [...cards].sort((a, b) => a.due - b.due)[0];
-    return React.createElement("div", {
+    return React.createElement(React.Fragment, null, React.createElement(GoalBar, {
+      doneToday: doneToday,
+      dailyGoal: dailyGoal,
+      streak: streak
+    }), celebrate && React.createElement(CelebrateBanner, {
+      streak: celebrate.streak,
+      onDismiss: onDismissCelebrate
+    }), React.createElement("div", {
       className: "rc-empty"
     }, React.createElement("p", {
       className: "rc-empty-big"
     }, "지금 복습할 카드가 없어요 🎉"), upcoming && React.createElement("p", null, "다음 카드는 ", React.createElement("b", null, fmtLeft(upcoming.due - now)), " 에 다시 나와요."), React.createElement("button", {
       className: "rc-cta ghost",
       onClick: () => setAheadId(upcoming?.id)
-    }, "그래도 미리 복습하기"));
+    }, "그래도 미리 복습하기")));
   }
   const isAhead = !dueCards[0];
   const rNow = retentionNow(card);
   const grades = [["again", "틀림", "again"], ["good", "맞음", "good"]];
   return React.createElement("div", {
     className: "rc-study"
-  }, React.createElement("div", {
+  }, React.createElement(GoalBar, {
+    doneToday: doneToday,
+    dailyGoal: dailyGoal,
+    streak: streak
+  }), celebrate && React.createElement(CelebrateBanner, {
+    streak: celebrate.streak,
+    onDismiss: onDismissCelebrate
+  }), React.createElement("div", {
     className: "rc-study-meta"
   }, React.createElement("div", {
     className: "rc-mat"
@@ -934,6 +1041,48 @@ function Pips({
     className: "pip" + (i < n ? " f" : "")
   })));
 }
+function GoalBar({
+  doneToday,
+  dailyGoal,
+  streak
+}) {
+  const pct = Math.min(100, Math.round(doneToday / Math.max(1, dailyGoal) * 100));
+  const done = doneToday >= dailyGoal;
+  return React.createElement("div", {
+    className: "rc-goalbar"
+  }, React.createElement("div", {
+    className: "rc-goalbar-top"
+  }, React.createElement("span", {
+    className: "rc-goalbar-label"
+  }, "오늘 목표 ", React.createElement("b", null, Math.min(doneToday, dailyGoal)), " / ", dailyGoal, done && " ✓"), streak > 0 && React.createElement("span", {
+    className: "rc-streak"
+  }, "🔥 ", streak, "일째")), React.createElement("div", {
+    className: "rc-goalbar-track"
+  }, React.createElement("div", {
+    className: "rc-goalbar-fill" + (done ? " full" : ""),
+    style: {
+      width: pct + "%"
+    }
+  })));
+}
+function CelebrateBanner({
+  streak,
+  onDismiss
+}) {
+  return React.createElement("div", {
+    className: "rc-celebrate"
+  }, React.createElement("span", {
+    className: "rc-celebrate-emoji"
+  }, "🎉"), React.createElement("div", {
+    className: "rc-celebrate-text"
+  }, React.createElement("b", null, "오늘 목표 달성!"), React.createElement("span", null, streak > 1 ? `연속 ${streak}일째 이어가는 중이에요.` : "오늘부터 다시 시작이에요.")), React.createElement("button", {
+    className: "rc-celebrate-close",
+    onClick: onDismiss,
+    "aria-label": "닫기"
+  }, "✕"));
+}
+const LS_API_KEY = "recall:claude-api-key";
+const AI_MODEL = "claude-haiku-4-5-20251001";
 function Add({
   cards,
   persist
@@ -945,6 +1094,8 @@ function Add({
   const [msg, setMsg] = useState("");
   const [mode, setMode] = useState("one");
   const [gridRows, setGridRows] = useState([]);
+  const [aiText, setAiText] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
   const addOne = () => {
     if (!ko.trim() || !es.trim()) return setMsg("한국어와 스페인어를 모두 입력해 주세요.");
     persist([...cards, newCard(ko, es, pron, note)]);
@@ -1020,6 +1171,65 @@ function Add({
     setMsg(`${valid.length}개를 추가했어요.` + (skipped ? ` (${skipped}개는 한국어·스페인어가 비어 있어 건너뜀)` : ""));
     setGridRows([]);
   };
+  const runAiParse = async () => {
+    const apiKey = (localStorage.getItem(LS_API_KEY) || "").trim();
+    if (!apiKey) {
+      setMsg("먼저 설정 탭에서 Claude API 키를 등록해 주세요.");
+      return;
+    }
+    if (!aiText.trim()) {
+      setMsg("정리할 텍스트를 붙여넣어 주세요.");
+      return;
+    }
+    setAiLoading(true);
+    setMsg("");
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          max_tokens: 4000,
+          system: "You build Spanish-conversation flashcards for a Korean speaker learning everyday Mexican Spanish. " + "The user's input may be: (a) plain Korean sentences with no translation yet, (b) notes that already mix in a Spanish translation, pronunciation, or grammar remarks (often messy, copied from a notes app), or (c) a mix of both. " + "Treat each line, or each clearly separate sentence, as one entry. For every entry produce exactly these four fields: " + "ko — the Korean sentence, as given. " + "es — a natural, conversational Mexican Spanish translation. If the source already gives a Spanish translation, use and lightly correct it rather than retranslating from scratch; if the source has no Spanish at all, translate the Korean yourself. " + "pron — a Korean-hangul phonetic transcription of your `es`, reflecting Mexican pronunciation (e.g. 'Vamos' → '바모스'). Always fill this in yourself even if the source had none. " + "note — a short, useful Korean-language grammar/vocabulary breakdown of the Spanish sentence (key words, conjugation, a couple of related expressions). If the source already includes grammar notes, keep and lightly clean them up rather than discarding them; otherwise write a concise one yourself. Preserve intentional line breaks as \\n. " + "Never fabricate a Korean sentence that isn't in the source, but always fill in es/pron/note yourself when missing — don't leave them blank just because the source didn't provide them. " + "Respond with ONLY a raw JSON array of objects with exactly these four keys — no markdown fences, no prose, no explanation.",
+          messages: [{
+            role: "user",
+            content: aiText
+          }]
+        })
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        if (res.status === 401) throw new Error("API 키가 올바르지 않아요.");
+        if (res.status === 429) throw new Error("요청이 너무 잦아요. 잠시 후 다시 시도해 주세요.");
+        throw new Error(`요청 실패 (${res.status})`);
+      }
+      const data = await res.json();
+      const textBlock = (data.content || []).find(b => b.type === "text");
+      if (!textBlock) throw new Error("응답에서 결과를 찾지 못했어요.");
+      const cleaned = textBlock.text.trim().replace(/^```json\s*|^```\s*|```$/g, "");
+      const parsed = JSON.parse(cleaned);
+      if (!Array.isArray(parsed)) throw new Error("형식을 알아보지 못했어요.");
+      const rows = parsed.map(r => ({
+        ko: (r.ko || "").trim(),
+        es: (r.es || "").trim(),
+        pron: (r.pron || "").trim(),
+        note: (r.note || "").trim()
+      })).filter(r => r.ko || r.es);
+      if (!rows.length) throw new Error("문장을 찾지 못했어요.");
+      setGridRows(prev => [...prev, ...rows]);
+      setAiText("");
+      setMsg(`${rows.length}개를 번역·정리했어요. 아래 표에서 확인하고 등록해 주세요.`);
+    } catch (e) {
+      setMsg("정리 실패: " + (e?.message || "알 수 없는 오류"));
+    } finally {
+      setAiLoading(false);
+    }
+  };
   return React.createElement("div", {
     className: "rc-add"
   }, React.createElement("div", {
@@ -1030,7 +1240,10 @@ function Add({
   }, "한 문장씩"), React.createElement("button", {
     className: mode === "grid" ? "on" : "",
     onClick: () => setMode("grid")
-  }, "여러 개 (표로 붙여넣기)")), mode === "one" ? React.createElement("div", {
+  }, "표로 붙여넣기"), React.createElement("button", {
+    className: mode === "ai" ? "on" : "",
+    onClick: () => setMode("ai")
+  }, "AI 번역·정리")), mode === "one" && React.createElement("div", {
     className: "rc-form"
   }, React.createElement("label", null, "한국어 (내가 하고 싶은 말)"), React.createElement("textarea", {
     value: ko,
@@ -1054,7 +1267,7 @@ function Add({
   }), React.createElement("button", {
     className: "rc-cta",
     onClick: addOne
-  }, "추가")) : React.createElement("div", {
+  }, "추가")), mode === "grid" && React.createElement("div", {
     className: "rc-form"
   }, React.createElement("label", null, "엑셀에서 한국어 · 스페인어 · 발음 · 문법 순서로 셀을 선택해 복사한 뒤, 아래에 붙여넣으세요."), React.createElement("textarea", {
     className: "rc-pastezone",
@@ -1063,7 +1276,18 @@ function Add({
     onPaste: handlePaste,
     placeholder: "여기를 클릭하고 Ctrl+V로 붙여넣으세요",
     rows: 3
-  }), gridRows.length > 0 && React.createElement("div", {
+  })), mode === "ai" && React.createElement("div", {
+    className: "rc-form"
+  }, React.createElement("label", null, "한 줄에 한 문장씩, ", React.createElement("b", null, "한국어만 적어도"), " 돼요. Claude가 스페인어 번역·한글 발음·문법 설명까지 전부 채워줘요. 원노트 등에 이미 스페인어나 설명을 같이 써둔 지저분한 메모를 그대로 붙여넣어도 알아서 정리해요."), React.createElement("textarea", {
+    value: aiText,
+    onChange: e => setAiText(e.target.value),
+    rows: 8,
+    placeholder: "예)\n주말에 동대문시장 놀러가자\n입술 만지지마\n너 입술 뜯지마"
+  }), React.createElement("button", {
+    className: "rc-cta",
+    onClick: runAiParse,
+    disabled: aiLoading
+  }, aiLoading ? "번역·정리 중…" : "Claude로 번역·정리하기")), gridRows.length > 0 && React.createElement("div", {
     className: "rc-gridwrap"
   }, React.createElement("table", {
     className: "rc-grid"
@@ -1097,7 +1321,7 @@ function Add({
   }, "모두 지우기"), React.createElement("button", {
     className: "rc-cta",
     onClick: commitGrid
-  }, gridRows.length, "개 등록")))), msg && React.createElement("div", {
+  }, gridRows.length, "개 등록"))), msg && React.createElement("div", {
     className: "rc-msg"
   }, msg));
 }
@@ -1301,6 +1525,9 @@ function ListView({
 function Settings({
   target,
   saveTarget,
+  dailyGoal,
+  saveDailyGoal,
+  streak,
   cards,
   mature,
   selfSave,
@@ -1319,13 +1546,17 @@ function Settings({
   if (!selfSave) {
     return React.createElement("div", {
       className: "rc-settings"
-    }, React.createElement(SettingsRetentionSection, {
+    }, React.createElement(SettingsGoalSection, {
+      dailyGoal: dailyGoal,
+      saveDailyGoal: saveDailyGoal
+    }), React.createElement(SettingsRetentionSection, {
       target: target,
       saveTarget: saveTarget
     }), React.createElement(SettingsStats, {
       cards: cards,
       reviewed: reviewed,
-      mature: mature
+      mature: mature,
+      streak: streak
     }));
   }
   return React.createElement("div", {
@@ -1393,14 +1624,87 @@ function Settings({
     }
   })), fileMsg && React.createElement("div", {
     className: "rc-msg"
-  }, fileMsg), React.createElement(SettingsRetentionSection, {
+  }, fileMsg), React.createElement(SettingsApiKeySection, null), React.createElement(SettingsGoalSection, {
+    dailyGoal: dailyGoal,
+    saveDailyGoal: saveDailyGoal
+  }), React.createElement(SettingsRetentionSection, {
     target: target,
     saveTarget: saveTarget
   }), React.createElement(SettingsStats, {
     cards: cards,
     reviewed: reviewed,
-    mature: mature
+    mature: mature,
+    streak: streak
   }));
+}
+function SettingsApiKeySection() {
+  const [key, setKey] = useState(() => localStorage.getItem(LS_API_KEY) || "");
+  const [saved, setSaved] = useState(!!localStorage.getItem(LS_API_KEY));
+  const [show, setShow] = useState(false);
+  const save = () => {
+    localStorage.setItem(LS_API_KEY, key.trim());
+    setSaved(true);
+  };
+  const remove = () => {
+    localStorage.removeItem(LS_API_KEY);
+    setKey("");
+    setSaved(false);
+  };
+  return React.createElement(React.Fragment, null, React.createElement("h3", {
+    className: "rc-h3"
+  }, "Claude API 키 (선택)"), React.createElement("p", {
+    className: "rc-p"
+  }, "추가 탭의 ", React.createElement("b", null, "\"AI 번역·정리\""), "에서 한국어 문장만 적어도 Claude가 스페인어 번역·한글 발음·문법 설명까지 채워줘요. 원노트 등에 이미 스페인어까지 지저분하게 써둔 메모를 붙여넣어도 알아서 정리하고요. 이 기능을 쓰려면 본인의 Anthropic API 키가 필요합니다."), React.createElement("p", {
+    className: "rc-p rc-p-mut"
+  }, "이 키는 ", React.createElement("b", null, "이 브라우저에만"), " 저장되고, 자체 저장 파일(HTML)에는 절대 포함되지 않아요. 그래서 이 파일을 깃허브 같은 공개된 곳에 올려도 키가 같이 노출되지 않습니다. 다만 다른 기기·브라우저에서는 다시 입력해 주셔야 해요."), React.createElement("div", {
+    className: "rc-apikey-row"
+  }, React.createElement("input", {
+    type: show ? "text" : "password",
+    value: key,
+    onChange: e => {
+      setKey(e.target.value);
+      setSaved(false);
+    },
+    placeholder: "sk-ant-..."
+  }), React.createElement("button", {
+    className: "rc-mini ghost",
+    onClick: () => setShow(s => !s)
+  }, show ? "숨기기" : "보기")), React.createElement("div", {
+    className: "rc-file-actions",
+    style: {
+      marginTop: 10
+    }
+  }, React.createElement("button", {
+    className: "rc-mini",
+    onClick: save,
+    disabled: !key.trim()
+  }, "저장"), React.createElement("button", {
+    className: "rc-mini ghost",
+    onClick: remove,
+    disabled: !localStorage.getItem(LS_API_KEY)
+  }, "키 삭제"), saved && key.trim() && React.createElement("span", {
+    className: "rc-apikey-ok"
+  }, "저장됨 ✓")));
+}
+function SettingsGoalSection({
+  dailyGoal,
+  saveDailyGoal
+}) {
+  return React.createElement(React.Fragment, null, React.createElement("h3", {
+    className: "rc-h3"
+  }, "오늘 목표"), React.createElement("p", {
+    className: "rc-p"
+  }, "한 번에 다 하려고 하면 오히려 안 하게 돼요. ", React.createElement("b", null, "작게 잡아서 매일 채우는 쪽"), "이 장기적으로 더 잘 이어집니다. 대기 카드가 많아도 오늘 몫만큼만 신경 쓰면 돼요."), React.createElement("div", {
+    className: "rc-targets"
+  }, GOALS.map(([g, name]) => React.createElement("button", {
+    key: g,
+    className: "rc-target" + (dailyGoal === g ? " on" : ""),
+    onClick: () => saveDailyGoal(g)
+  }, React.createElement("span", {
+    className: "t-pct"
+  }, g, "개"), React.createElement("span", {
+    className: "t-name"
+  }, name)))));
 }
 function SettingsRetentionSection({
   target,
@@ -1431,11 +1735,12 @@ function SettingsRetentionSection({
 function SettingsStats({
   cards,
   reviewed,
-  mature
+  mature,
+  streak
 }) {
   return React.createElement("div", {
     className: "rc-stat"
-  }, React.createElement("div", null, React.createElement("b", null, reviewed), React.createElement("span", null, "복습 시작한 문장")), React.createElement("div", null, React.createElement("b", null, mature), React.createElement("span", null, "체화 (안정성 21일↑)")), React.createElement("div", null, React.createElement("b", null, cards.length - reviewed), React.createElement("span", null, "아직 새 카드")));
+  }, React.createElement("div", null, React.createElement("b", null, streak), React.createElement("span", null, "연속 학습일")), React.createElement("div", null, React.createElement("b", null, reviewed), React.createElement("span", null, "복습 시작한 문장")), React.createElement("div", null, React.createElement("b", null, mature), React.createElement("span", null, "체화 (안정성 21일↑)")), React.createElement("div", null, React.createElement("b", null, cards.length - reviewed), React.createElement("span", null, "아직 새 카드")));
 }
 function StyleTag() {
   return React.createElement("style", null, `
@@ -1458,6 +1763,21 @@ function StyleTag() {
   border-radius:9px;display:grid;place-items:center;padding:0 5px}
 .rc-err{background:#fdecea;color:#a3271a;padding:8px 12px;border-radius:8px;margin-top:10px;font-size:13px}
 .rc-study{padding:22px 0}
+.rc-goalbar{margin-bottom:16px}
+.rc-goalbar-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.rc-goalbar-label{font-size:13px;color:var(--mut)}
+.rc-goalbar-label b{color:var(--ink);font-variant-numeric:tabular-nums}
+.rc-streak{font-size:13px;font-weight:600;color:var(--marigold)}
+.rc-goalbar-track{height:6px;background:var(--line);border-radius:4px;overflow:hidden}
+.rc-goalbar-fill{height:100%;background:var(--pine);border-radius:4px;transition:width .3s ease}
+.rc-goalbar-fill.full{background:var(--marigold)}
+.rc-celebrate{display:flex;align-items:center;gap:12px;background:var(--amber-soft);border:1px solid #f0d99a;
+  border-radius:14px;padding:14px 16px;margin-bottom:16px;animation:rise .25s ease}
+.rc-celebrate-emoji{font-size:26px;flex:none}
+.rc-celebrate-text{flex:1;display:flex;flex-direction:column;gap:2px}
+.rc-celebrate-text b{font-size:14px;color:#6a4a06}
+.rc-celebrate-text span{font-size:12px;color:#8a6a1f}
+.rc-celebrate-close{flex:none;background:none;border:none;font-size:15px;color:#8a6a1f;cursor:pointer;padding:4px}
 .rc-study-meta{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px}
 .rc-mat{display:flex;align-items:center;gap:10px}
 .rc-ef{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
@@ -1570,7 +1890,13 @@ function StyleTag() {
 .rc-file-name{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
 .rc-file-state{font-size:12px;color:var(--mut)}
 .rc-file-actions{display:flex;gap:8px;flex-wrap:wrap}
-.rc-stat{display:flex;gap:10px;margin-top:16px}
+.rc-apikey-row{display:flex;gap:8px;margin-top:10px}
+.rc-apikey-row input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+  font:inherit;font-size:14px;background:var(--surface);color:var(--ink)}
+.rc-apikey-row input:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-color:transparent}
+.rc-apikey-ok{font-size:12px;color:var(--pine);font-weight:600;align-self:center}
+.rc-stat{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.rc-stat>div{min-width:78px}
 .rc-stat>div{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center;display:flex;flex-direction:column;gap:4px}
 .rc-stat b{font-family:Georgia,'Times New Roman',serif;font-size:22px;color:var(--ink)}
 .rc-stat span{font-size:11px;color:var(--mut);line-height:1.3}
