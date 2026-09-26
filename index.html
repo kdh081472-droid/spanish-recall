@@ -383,7 +383,6 @@ const S_MAX = 365;
 const FUZZ = 0.05;
 const MATURE_S = 21;
 const TARGETS = [[0.85, "느슨", "덜 자주, 리뷰 부담 최소"], [0.9, "표준", "일반적인 학습 기본값"], [0.92, "탄탄", "확실히 붙이고 싶을 때"], [0.95, "반사적", "툭 치면 툭 나오게"]];
-const GOALS = [[5, "가볍게"], [10, "표준"], [15, "탄탄히"], [20, "몰아서"]];
 const todayStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const KEY_V3 = "recall:cards:v3";
 const KEY_V2 = "recall:cards:v2";
@@ -454,7 +453,10 @@ function parseImportedText(text) {
     target: typeof obj.target === "number" ? obj.target : null,
     dailyGoal: typeof obj.dailyGoal === "number" ? obj.dailyGoal : null,
     streak: typeof obj.streak === "number" ? obj.streak : null,
-    lastGoalDate: typeof obj.lastGoalDate === "string" ? obj.lastGoalDate : null
+    lastGoalDate: typeof obj.lastGoalDate === "string" ? obj.lastGoalDate : null,
+    instructions: typeof obj.instructions === "string" ? obj.instructions : null,
+    goalIds: Array.isArray(obj.goalIds) ? obj.goalIds : null,
+    goalDate: typeof obj.goalDate === "string" ? obj.goalDate : null
   };
 }
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -588,6 +590,9 @@ function App() {
   const [dailyGoal, setDailyGoalState] = useState(10);
   const [streak, setStreak] = useState(0);
   const [lastGoalDate, setLastGoalDate] = useState(null);
+  const [instructions, setInstructions] = useState("");
+  const [goalIds, setGoalIds] = useState([]);
+  const [goalDate, setGoalDate] = useState(null);
   const [celebrate, setCelebrate] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");
@@ -616,6 +621,9 @@ function App() {
           if (typeof seed.dailyGoal === "number") setDailyGoalState(seed.dailyGoal);
           if (typeof seed.streak === "number") setStreak(seed.streak);
           if (typeof seed.lastGoalDate === "string") setLastGoalDate(seed.lastGoalDate);
+          if (typeof seed.instructions === "string") setInstructions(seed.instructions);
+          if (Array.isArray(seed.goalIds)) setGoalIds(seed.goalIds);
+          if (typeof seed.goalDate === "string") setGoalDate(seed.goalDate);
           setLoaded(true);
           return;
         }
@@ -628,6 +636,9 @@ function App() {
           if (typeof parsed.dailyGoal === "number") setDailyGoalState(parsed.dailyGoal);
           if (typeof parsed.streak === "number") setStreak(parsed.streak);
           if (typeof parsed.lastGoalDate === "string") setLastGoalDate(parsed.lastGoalDate);
+          if (typeof parsed.instructions === "string") setInstructions(parsed.instructions);
+          if (Array.isArray(parsed.goalIds)) setGoalIds(parsed.goalIds);
+          if (typeof parsed.goalDate === "string") setGoalDate(parsed.goalDate);
         }
       } catch (e) {}
       for (const [key, isV3] of [[KEY_V3, true], [KEY_V2, false], [KEY_V1, false]]) {
@@ -694,32 +705,53 @@ function App() {
       target,
       dailyGoal,
       streak,
-      lastGoalDate
+      lastGoalDate,
+      instructions,
+      goalIds,
+      goalDate
     });
-  }, [fileHandle, fileStatus, target, dailyGoal, streak, lastGoalDate, writeSelfFile]);
+  }, [fileHandle, fileStatus, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, writeSelfFile]);
   const persistMeta = useCallback(async patch => {
     const next = {
       target,
       dailyGoal,
       streak,
       lastGoalDate,
+      instructions,
+      goalIds,
+      goalDate,
       ...patch
     };
     setTarget(next.target);
     setDailyGoalState(next.dailyGoal);
     setStreak(next.streak);
     setLastGoalDate(next.lastGoalDate);
+    setInstructions(next.instructions);
+    setGoalIds(next.goalIds);
+    setGoalDate(next.goalDate);
     try {
       await window.storage.set(KEY_SET, JSON.stringify(next));
     } catch (e) {}
     if (fileHandle && fileStatus === "connected") writeSelfFile(fileHandle, cards, next);
-  }, [target, dailyGoal, streak, lastGoalDate, fileHandle, fileStatus, cards, writeSelfFile]);
+  }, [target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, fileHandle, fileStatus, cards, writeSelfFile]);
   const saveTarget = useCallback(t => persistMeta({
     target: t
   }), [persistMeta]);
   const saveDailyGoal = useCallback(g => persistMeta({
     dailyGoal: g
   }), [persistMeta]);
+  const saveInstructions = useCallback(t => persistMeta({
+    instructions: t
+  }), [persistMeta]);
+  const recordGood = useCallback(cardId => {
+    const today = todayStr();
+    const base = goalDate === today ? goalIds : [];
+    if (base.includes(cardId)) return;
+    persistMeta({
+      goalIds: [...base, cardId],
+      goalDate: today
+    });
+  }, [goalDate, goalIds, persistMeta]);
   const connectSelfFile = useCallback(async () => {
     if (!FS_SUPPORTED) return;
     try {
@@ -752,13 +784,16 @@ function App() {
         target,
         dailyGoal,
         streak,
-        lastGoalDate
+        lastGoalDate,
+        instructions,
+        goalIds,
+        goalDate
       });
       setFileMsg("이 파일 하나에 연결했어요. 이제부터 여기에 자동 저장돼요.");
     } catch (e) {
       if (e?.name !== "AbortError") setFileMsg("연결하지 못했어요.");
     }
-  }, [cards, target, dailyGoal, streak, lastGoalDate, writeSelfFile]);
+  }, [cards, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, writeSelfFile]);
   const reconnectSelfFile = useCallback(async () => {
     if (!fileHandle) return;
     try {
@@ -788,7 +823,10 @@ function App() {
       target,
       dailyGoal,
       streak,
-      lastGoalDate
+      lastGoalDate,
+      instructions,
+      goalIds,
+      goalDate
     });
     if (!html) {
       setFileMsg("파일을 만들지 못했어요.");
@@ -806,7 +844,7 @@ function App() {
     a.remove();
     URL.revokeObjectURL(url);
     setFileMsg("데이터가 담긴 파일을 다운로드했어요. 기존 파일을 이걸로 바꿔주세요.");
-  }, [cards, target, dailyGoal, streak, lastGoalDate]);
+  }, [cards, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate]);
   const importFile = useCallback(async file => {
     try {
       const text = await file.text();
@@ -815,7 +853,10 @@ function App() {
         target: loadedTarget,
         dailyGoal: loadedGoal,
         streak: loadedStreak,
-        lastGoalDate: loadedLGD
+        lastGoalDate: loadedLGD,
+        instructions: loadedInstr,
+        goalIds: loadedGoalIds,
+        goalDate: loadedGoalDate
       } = parseImportedText(text);
       persist(loadedCards);
       persistMeta({
@@ -830,6 +871,15 @@ function App() {
         } : {}),
         ...(loadedLGD != null ? {
           lastGoalDate: loadedLGD
+        } : {}),
+        ...(loadedInstr != null ? {
+          instructions: loadedInstr
+        } : {}),
+        ...(loadedGoalIds != null ? {
+          goalIds: loadedGoalIds
+        } : {}),
+        ...(loadedGoalDate != null ? {
+          goalDate: loadedGoalDate
         } : {})
       });
       setFileMsg(`가져왔어요 (${loadedCards.length}개).`);
@@ -845,8 +895,11 @@ function App() {
     return cards.filter(c => c.reviewedAt >= t0).length;
   }, [cards, now]);
   const mature = cards.filter(c => c.S >= MATURE_S).length;
+  const goalCount = useMemo(() => {
+    return goalDate === todayStr(new Date(now)) ? goalIds.length : 0;
+  }, [goalIds, goalDate, now]);
   useEffect(() => {
-    if (!loaded || doneToday < dailyGoal) return;
+    if (!loaded || goalCount < dailyGoal) return;
     const today = todayStr();
     if (lastGoalDate === today) return;
     const yesterday = todayStr(new Date(Date.now() - DAY));
@@ -858,7 +911,7 @@ function App() {
     setCelebrate({
       streak: nextStreak
     });
-  }, [doneToday, dailyGoal, loaded]);
+  }, [goalCount, dailyGoal, loaded]);
   const dismissCelebrate = useCallback(() => setCelebrate(null), []);
   return React.createElement("div", {
     className: "rc-root"
@@ -892,13 +945,16 @@ function App() {
     persist: persist,
     goAdd: () => setTab("add"),
     dailyGoal: dailyGoal,
-    doneToday: doneToday,
+    goalCount: goalCount,
     streak: streak,
     celebrate: celebrate,
-    onDismissCelebrate: dismissCelebrate
+    onDismissCelebrate: dismissCelebrate,
+    onGoodAnswer: recordGood
   }) : tab === "add" ? React.createElement(Add, {
     cards: cards,
-    persist: persist
+    persist: persist,
+    instructions: instructions,
+    saveInstructions: saveInstructions
   }) : tab === "list" ? React.createElement(ListView, {
     cards: cards,
     persist: persist,
@@ -933,10 +989,11 @@ function Study({
   persist,
   goAdd,
   dailyGoal,
-  doneToday,
+  goalCount,
   streak,
   celebrate,
-  onDismissCelebrate
+  onDismissCelebrate,
+  onGoodAnswer
 }) {
   const [revealed, setRevealed] = useState(false);
   const [aheadId, setAheadId] = useState(null);
@@ -946,6 +1003,7 @@ function Study({
   const grade = result => {
     if (!card) return;
     persist(cards.map(c => c.id === card.id ? schedule(c, result, target) : c));
+    if (result === "good") onGoodAnswer(card.id);
     setAheadId(null);
     setRevealed(false);
   };
@@ -960,7 +1018,7 @@ function Study({
   if (!card) {
     const upcoming = [...cards].sort((a, b) => a.due - b.due)[0];
     return React.createElement(React.Fragment, null, React.createElement(GoalBar, {
-      doneToday: doneToday,
+      count: goalCount,
       dailyGoal: dailyGoal,
       streak: streak
     }), celebrate && React.createElement(CelebrateBanner, {
@@ -981,7 +1039,7 @@ function Study({
   return React.createElement("div", {
     className: "rc-study"
   }, React.createElement(GoalBar, {
-    doneToday: doneToday,
+    count: goalCount,
     dailyGoal: dailyGoal,
     streak: streak
   }), celebrate && React.createElement(CelebrateBanner, {
@@ -1042,19 +1100,19 @@ function Pips({
   })));
 }
 function GoalBar({
-  doneToday,
+  count,
   dailyGoal,
   streak
 }) {
-  const pct = Math.min(100, Math.round(doneToday / Math.max(1, dailyGoal) * 100));
-  const done = doneToday >= dailyGoal;
+  const pct = Math.min(100, Math.round(count / Math.max(1, dailyGoal) * 100));
+  const done = count >= dailyGoal;
   return React.createElement("div", {
     className: "rc-goalbar"
   }, React.createElement("div", {
     className: "rc-goalbar-top"
   }, React.createElement("span", {
     className: "rc-goalbar-label"
-  }, "오늘 목표 ", React.createElement("b", null, Math.min(doneToday, dailyGoal)), " / ", dailyGoal, done && " ✓"), streak > 0 && React.createElement("span", {
+  }, "오늘 목표 ", React.createElement("b", null, Math.min(count, dailyGoal)), " / ", dailyGoal, done && " ✓"), streak > 0 && React.createElement("span", {
     className: "rc-streak"
   }, "🔥 ", streak, "일째")), React.createElement("div", {
     className: "rc-goalbar-track"
@@ -1085,7 +1143,9 @@ const LS_API_KEY = "recall:claude-api-key";
 const AI_MODEL = "claude-sonnet-5";
 function Add({
   cards,
-  persist
+  persist,
+  instructions,
+  saveInstructions
 }) {
   const [ko, setKo] = useState("");
   const [es, setEs] = useState("");
@@ -1096,6 +1156,17 @@ function Add({
   const [gridRows, setGridRows] = useState([]);
   const [aiText, setAiText] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [showInstr, setShowInstr] = useState(false);
+  const [draftInstr, setDraftInstr] = useState(instructions || "");
+  const openInstructions = () => {
+    setDraftInstr(instructions || "");
+    setShowInstr(true);
+  };
+  const saveInstructionsAndClose = () => {
+    saveInstructions(draftInstr);
+    setShowInstr(false);
+  };
+  const closeInstructions = () => setShowInstr(false);
   const addOne = () => {
     if (!ko.trim() || !es.trim()) return setMsg("한국어와 스페인어를 모두 입력해 주세요.");
     persist([...cards, newCard(ko, es, pron, note)]);
@@ -1185,6 +1256,8 @@ function Add({
     setAiLoading(true);
     setMsg("");
     try {
+      const extraInstr = (instructions || "").trim();
+      const systemPrompt = "You build Spanish-conversation flashcards for a Korean speaker learning everyday Mexican Spanish. " + "The user's input may be: (a) plain Korean sentences with no translation yet, (b) notes that already mix in a Spanish translation, pronunciation, or grammar remarks (often messy, copied from a notes app), or (c) a mix of both. " + "Treat each line, or each clearly separate sentence, as one entry. For every entry produce exactly these four fields: " + "ko — the Korean sentence, as given. " + "es — a natural, conversational Mexican Spanish translation. If the source already gives a Spanish translation, use and lightly correct it rather than retranslating from scratch; if the source has no Spanish at all, translate the Korean yourself. " + "pron — a Korean-hangul phonetic transcription of your `es`, reflecting Mexican pronunciation (e.g. 'Vamos' → '바모스'). Always fill this in yourself even if the source had none. " + "note — a short, useful Korean-language grammar/vocabulary breakdown of the Spanish sentence (key words, conjugation, a couple of related expressions). If the source already includes grammar notes, keep and lightly clean them up rather than discarding them; otherwise write a concise one yourself. Preserve intentional line breaks as \\n. " + "Never fabricate a Korean sentence that isn't in the source, but always fill in es/pron/note yourself when missing — don't leave them blank just because the source didn't provide them. " + (extraInstr ? "Also follow these standing preferences the user has saved for you — they may adjust tone, phonetic spelling style, note length, and similar stylistic choices, but never the four required fields or the JSON-only output format: " + extraInstr + " " : "") + "Respond with ONLY a raw JSON array of objects with exactly these four keys — no markdown fences, no prose, no explanation.";
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -1196,7 +1269,7 @@ function Add({
         body: JSON.stringify({
           model,
           max_tokens: 4000,
-          system: "You build Spanish-conversation flashcards for a Korean speaker learning everyday Mexican Spanish. " + "The user's input may be: (a) plain Korean sentences with no translation yet, (b) notes that already mix in a Spanish translation, pronunciation, or grammar remarks (often messy, copied from a notes app), or (c) a mix of both. " + "Treat each line, or each clearly separate sentence, as one entry. For every entry produce exactly these four fields: " + "ko — the Korean sentence, as given. " + "es — a natural, conversational Mexican Spanish translation. If the source already gives a Spanish translation, use and lightly correct it rather than retranslating from scratch; if the source has no Spanish at all, translate the Korean yourself. " + "pron — a Korean-hangul phonetic transcription of your `es`, reflecting Mexican pronunciation (e.g. 'Vamos' → '바모스'). Always fill this in yourself even if the source had none. " + "note — a short, useful Korean-language grammar/vocabulary breakdown of the Spanish sentence (key words, conjugation, a couple of related expressions). If the source already includes grammar notes, keep and lightly clean them up rather than discarding them; otherwise write a concise one yourself. Preserve intentional line breaks as \\n. " + "Never fabricate a Korean sentence that isn't in the source, but always fill in es/pron/note yourself when missing — don't leave them blank just because the source didn't provide them. " + "Respond with ONLY a raw JSON array of objects with exactly these four keys — no markdown fences, no prose, no explanation.",
+          system: systemPrompt,
           messages: [{
             role: "user",
             content: aiText
@@ -1279,7 +1352,28 @@ function Add({
     rows: 3
   })), mode === "ai" && React.createElement("div", {
     className: "rc-form"
-  }, React.createElement("label", null, "한 줄에 한 문장씩, ", React.createElement("b", null, "한국어만 적어도"), " 돼요. Claude가 스페인어 번역·한글 발음·문법 설명까지 전부 채워줘요. 원노트 등에 이미 스페인어나 설명을 같이 써둔 지저분한 메모를 그대로 붙여넣어도 알아서 정리해요."), React.createElement("textarea", {
+  }, React.createElement("div", {
+    className: "rc-instr-row"
+  }, React.createElement("button", {
+    className: "rc-instr-btn",
+    onClick: openInstructions,
+    type: "button"
+  }, React.createElement("svg", {
+    width: "13",
+    height: "13",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, React.createElement("circle", {
+    cx: "12",
+    cy: "12",
+    r: "3"
+  }), React.createElement("path", {
+    d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+  })), "지침 설정")), React.createElement("label", null, "한 줄에 한 문장씩, ", React.createElement("b", null, "한국어만 적어도"), " 돼요. Claude가 스페인어 번역·한글 발음·문법 설명까지 전부 채워줘요. 원노트 등에 이미 스페인어나 설명을 같이 써둔 지저분한 메모를 그대로 붙여넣어도 알아서 정리해요."), React.createElement("textarea", {
     value: aiText,
     onChange: e => setAiText(e.target.value),
     rows: 8,
@@ -1288,7 +1382,40 @@ function Add({
     className: "rc-cta",
     onClick: runAiParse,
     disabled: aiLoading
-  }, aiLoading ? "번역·정리 중…" : "Claude로 번역·정리하기")), gridRows.length > 0 && React.createElement("div", {
+  }, aiLoading ? "번역·정리 중…" : "Claude로 번역·정리하기")), showInstr && React.createElement("div", {
+    className: "rc-modal-overlay",
+    onClick: closeInstructions
+  }, React.createElement("div", {
+    className: "rc-modal-card",
+    onClick: e => e.stopPropagation()
+  }, React.createElement("div", {
+    className: "rc-modal-head"
+  }, React.createElement("div", {
+    className: "rc-modal-title"
+  }, "지침 설정"), React.createElement("button", {
+    className: "rc-modal-close",
+    onClick: closeInstructions,
+    "aria-label": "닫기"
+  }, "✕")), React.createElement("p", {
+    className: "rc-modal-desc"
+  }, "말투·발음 표기·설명 스타일처럼 매번 적용하고 싶은 규칙을 적어두세요. 이 파일 자체에 저장돼서 다른 기기에서 열어도 똑같이 적용돼요."), React.createElement("textarea", {
+    className: "rc-modal-textarea",
+    value: draftInstr,
+    onChange: e => setDraftInstr(e.target.value),
+    rows: 6,
+    placeholder: "예)\n반말 기준으로 번역해줘\n발음은 부드러운 표기로 (된소리 대신 순한소리)\n설명은 한 줄로 짧게"
+  }), React.createElement("div", {
+    className: "rc-modal-actions"
+  }, React.createElement("button", {
+    className: "rc-cta",
+    style: {
+      marginTop: 0
+    },
+    onClick: saveInstructionsAndClose
+  }, "저장"), React.createElement("button", {
+    className: "rc-mini ghost",
+    onClick: closeInstructions
+  }, "취소")))), gridRows.length > 0 && React.createElement("div", {
     className: "rc-gridwrap"
   }, React.createElement("table", {
     className: "rc-grid"
@@ -1691,21 +1818,35 @@ function SettingsGoalSection({
   dailyGoal,
   saveDailyGoal
 }) {
+  const [draft, setDraft] = useState(String(dailyGoal));
+  const n = parseInt(draft, 10);
+  const valid = Number.isFinite(n) && n >= 1;
+  const save = () => {
+    if (!valid) return;
+    saveDailyGoal(n);
+  };
   return React.createElement(React.Fragment, null, React.createElement("h3", {
     className: "rc-h3"
   }, "오늘 목표"), React.createElement("p", {
     className: "rc-p"
   }, "한 번에 다 하려고 하면 오히려 안 하게 돼요. ", React.createElement("b", null, "작게 잡아서 매일 채우는 쪽"), "이 장기적으로 더 잘 이어집니다. 대기 카드가 많아도 오늘 몫만큼만 신경 쓰면 돼요."), React.createElement("div", {
-    className: "rc-targets"
-  }, GOALS.map(([g, name]) => React.createElement("button", {
-    key: g,
-    className: "rc-target" + (dailyGoal === g ? " on" : ""),
-    onClick: () => saveDailyGoal(g)
-  }, React.createElement("span", {
-    className: "t-pct"
-  }, g, "개"), React.createElement("span", {
-    className: "t-name"
-  }, name)))));
+    className: "rc-goalset-row"
+  }, React.createElement("input", {
+    type: "number",
+    min: "1",
+    inputMode: "numeric",
+    className: "rc-goalset-input",
+    value: draft,
+    onChange: e => setDraft(e.target.value)
+  }), React.createElement("span", {
+    className: "rc-goalset-unit"
+  }, "개"), React.createElement("button", {
+    className: "rc-mini",
+    onClick: save,
+    disabled: !valid
+  }, "저장")), React.createElement("div", {
+    className: "rc-goalset-current"
+  }, "지금 목표: ", dailyGoal, "개"));
 }
 function SettingsRetentionSection({
   target,
@@ -1749,8 +1890,10 @@ function StyleTag() {
   --marigold:#E39A16;--pine:#14655B;--mint:#2FA98E;--clay:#C15039;--amber-soft:#FBEFD6}
 *{box-sizing:border-box}
 .rc-root{max-width:720px;margin:0 auto;min-height:100%;background:var(--paper);color:var(--ink);
-  font-family:'Malgun Gothic','Apple SD Gothic Neo',system-ui,'Segoe UI',sans-serif;display:flex;flex-direction:column;padding:0 16px 88px}
-.rc-top{position:sticky;top:0;z-index:5;background:var(--paper);padding:18px 0 10px;border-bottom:1px solid var(--line)}
+  font-family:'Malgun Gothic','Apple SD Gothic Neo',system-ui,'Segoe UI',sans-serif;display:flex;flex-direction:column;
+  padding:0 16px calc(88px + env(safe-area-inset-bottom, 0px))}
+.rc-top{position:sticky;top:0;z-index:5;background:var(--paper);
+  padding:calc(18px + env(safe-area-inset-top, 0px)) 0 10px;border-bottom:1px solid var(--line)}
 .rc-brand{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .rc-logo{width:42px;height:42px;border-radius:12px;background:var(--ink);color:var(--marigold);
   font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:22px;display:grid;place-items:center;flex:none}
@@ -1824,6 +1967,23 @@ function StyleTag() {
   border-radius:11px;font:inherit;font-size:15px;background:var(--surface);color:var(--ink);resize:vertical}
 .rc-form textarea:focus,.rc-form input:focus,.rc-search:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-color:transparent}
 .rc-msg{margin-top:14px;background:var(--amber-soft);color:#6a4a06;padding:10px 14px;border-radius:10px;font-size:14px}
+.rc-instr-row{display:flex;justify-content:flex-end;margin-bottom:2px}
+.rc-instr-btn{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);
+  border-radius:9px;padding:7px 11px;font:inherit;font-size:12px;color:var(--ink);cursor:pointer}
+.rc-modal-overlay{position:fixed;inset:0;background:rgba(35,32,26,0.55);display:flex;align-items:center;
+  justify-content:center;padding:24px;z-index:50}
+.rc-modal-card{width:100%;max-width:330px;background:var(--surface);border-radius:20px;padding:22px;
+  display:flex;flex-direction:column;gap:14px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.rc-modal-head{display:flex;align-items:center;justify-content:space-between}
+.rc-modal-title{font-size:17px;font-weight:700;color:var(--ink)}
+.rc-modal-close{background:none;border:none;font-size:16px;color:var(--mut);cursor:pointer;padding:4px}
+.rc-modal-desc{font-size:12px;color:var(--mut);line-height:1.6;margin:0}
+.rc-modal-textarea{border:1px solid var(--line);border-radius:10px;padding:12px;min-height:120px;
+  font:inherit;font-size:13px;line-height:1.7;color:var(--ink);background:var(--paper);resize:vertical}
+.rc-modal-textarea:focus{outline:2px solid var(--marigold);outline-offset:-1px}
+.rc-modal-actions{display:flex;gap:8px}
+.rc-modal-actions .rc-cta{flex:1}
+.rc-modal-actions .rc-mini{flex:1;text-align:center}
 .rc-pastezone{border:2px dashed var(--line);background:var(--paper);color:var(--mut);text-align:center;
   padding-top:10px;font-size:14px;resize:none;cursor:text}
 .rc-pastezone:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-style:solid;border-color:transparent}
@@ -1876,6 +2036,12 @@ function StyleTag() {
 .rc-h3:not(:first-child){margin-top:28px}
 .rc-p{font-size:14px;line-height:1.65;color:var(--mut);margin:0}
 .rc-targets{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.rc-goalset-row{display:flex;align-items:center;gap:8px;margin-top:14px}
+.rc-goalset-input{width:80px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+  font:inherit;font-size:16px;text-align:center;background:var(--surface);color:var(--ink)}
+.rc-goalset-input:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-color:transparent}
+.rc-goalset-unit{font-size:14px;color:var(--mut)}
+.rc-goalset-current{margin-top:8px;font-size:12px;color:var(--mut)}
 .rc-target{text-align:left;padding:14px;border:1px solid var(--line);background:var(--surface);border-radius:14px;cursor:pointer;
   display:flex;flex-direction:column;gap:3px;transition:.15s}
 .rc-target.on{border-color:var(--pine);background:#eef6f4;box-shadow:0 0 0 1px var(--pine) inset}
@@ -1902,7 +2068,7 @@ function StyleTag() {
 .rc-stat b{font-family:Georgia,'Times New Roman',serif;font-size:22px;color:var(--ink)}
 .rc-stat span{font-size:11px;color:var(--mut);line-height:1.3}
 .rc-foot{position:fixed;left:0;right:0;bottom:0;max-width:720px;margin:0 auto;background:var(--surface);border-top:1px solid var(--line);
-  display:flex;justify-content:space-around;padding:11px 16px;font-size:12px;color:var(--mut)}
+  display:flex;justify-content:space-around;padding:11px 16px calc(11px + env(safe-area-inset-bottom, 0px)) 16px;font-size:12px;color:var(--mut)}
 .rc-foot b{color:var(--ink);font-variant-numeric:tabular-nums}
 @media (max-width:480px){.rc-ko{font-size:24px}.rc-es{font-size:23px}.rc-item{flex-direction:column}
   .rc-item-actions{flex-direction:row;flex-wrap:wrap}.g-label{font-size:13px}.rc-targets{grid-template-columns:1fr}}
