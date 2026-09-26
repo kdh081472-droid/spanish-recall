@@ -1082,7 +1082,7 @@ function CelebrateBanner({
   }, "✕"));
 }
 const LS_API_KEY = "recall:claude-api-key";
-const AI_MODEL = "claude-haiku-4-5-20251001";
+const AI_MODEL = "claude-sonnet-5";
 function Add({
   cards,
   persist
@@ -1173,6 +1173,7 @@ function Add({
   };
   const runAiParse = async () => {
     const apiKey = (localStorage.getItem(LS_API_KEY) || "").trim();
+    const model = AI_MODEL;
     if (!apiKey) {
       setMsg("먼저 설정 탭에서 Claude API 키를 등록해 주세요.");
       return;
@@ -1193,7 +1194,7 @@ function Add({
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: AI_MODEL,
+          model,
           max_tokens: 4000,
           system: "You build Spanish-conversation flashcards for a Korean speaker learning everyday Mexican Spanish. " + "The user's input may be: (a) plain Korean sentences with no translation yet, (b) notes that already mix in a Spanish translation, pronunciation, or grammar remarks (often messy, copied from a notes app), or (c) a mix of both. " + "Treat each line, or each clearly separate sentence, as one entry. For every entry produce exactly these four fields: " + "ko — the Korean sentence, as given. " + "es — a natural, conversational Mexican Spanish translation. If the source already gives a Spanish translation, use and lightly correct it rather than retranslating from scratch; if the source has no Spanish at all, translate the Korean yourself. " + "pron — a Korean-hangul phonetic transcription of your `es`, reflecting Mexican pronunciation (e.g. 'Vamos' → '바모스'). Always fill this in yourself even if the source had none. " + "note — a short, useful Korean-language grammar/vocabulary breakdown of the Spanish sentence (key words, conjugation, a couple of related expressions). If the source already includes grammar notes, keep and lightly clean them up rather than discarding them; otherwise write a concise one yourself. Preserve intentional line breaks as \\n. " + "Never fabricate a Korean sentence that isn't in the source, but always fill in es/pron/note yourself when missing — don't leave them blank just because the source didn't provide them. " + "Respond with ONLY a raw JSON array of objects with exactly these four keys — no markdown fences, no prose, no explanation.",
           messages: [{
@@ -1654,7 +1655,7 @@ function SettingsApiKeySection() {
     className: "rc-h3"
   }, "Claude API 키 (선택)"), React.createElement("p", {
     className: "rc-p"
-  }, "추가 탭의 ", React.createElement("b", null, "\"AI 번역·정리\""), "에서 한국어 문장만 적어도 Claude가 스페인어 번역·한글 발음·문법 설명까지 채워줘요. 원노트 등에 이미 스페인어까지 지저분하게 써둔 메모를 붙여넣어도 알아서 정리하고요. 이 기능을 쓰려면 본인의 Anthropic API 키가 필요합니다."), React.createElement("p", {
+  }, "추가 탭의 ", React.createElement("b", null, "\"AI 번역·정리\""), "에서 한국어 문장만 적어도 Claude(Sonnet 5)가 스페인어 번역·한글 발음·문법 설명까지 채워줘요. 원노트 등에 이미 스페인어까지 지저분하게 써둔 메모를 붙여넣어도 알아서 정리하고요. 번역 품질이 중요한 작업이라 모델은 Sonnet 5로 고정돼 있어요. 이 기능을 쓰려면 본인의 Anthropic API 키가 필요합니다."), React.createElement("p", {
     className: "rc-p rc-p-mut"
   }, "이 키는 ", React.createElement("b", null, "이 브라우저에만"), " 저장되고, 자체 저장 파일(HTML)에는 절대 포함되지 않아요. 그래서 이 파일을 깃허브 같은 공개된 곳에 올려도 키가 같이 노출되지 않습니다. 다만 다른 기기·브라우저에서는 다시 입력해 주셔야 해요."), React.createElement("div", {
     className: "rc-apikey-row"
