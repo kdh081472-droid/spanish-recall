@@ -1231,13 +1231,21 @@ function LearnMode({
       setTimeout(() => setAnimating(false), 220);
     }
   };
-  const markLearned = () => {
-    const ids = new Set(learnQueue.map(c => c.id));
-    persist(cards.map(c => ids.has(c.id) ? {
-      ...c,
-      learned: true
-    } : c));
-    goTest();
+  const markOneLearned = () => {
+    if (!card || animating) return;
+    const id = card.id;
+    const wasLast = learnQueue.length === 1;
+    setAnimating(true);
+    setDragX((stateRef.current.width || 320) * 1.2);
+    setTimeout(() => {
+      persist(cards.map(c => c.id === id ? {
+        ...c,
+        learned: true
+      } : c));
+      setDragX(0);
+      setAnimating(false);
+      if (wasLast) goTest();
+    }, 220);
   };
   const width = stateRef.current.width || 320;
   const progress = Math.min(1, Math.abs(dragX) / (width * SWIPE_THRESHOLD_RATIO));
@@ -1328,8 +1336,8 @@ function LearnMode({
     className: "rc-note-tag"
   }, "문법"), card.note))))), React.createElement("button", {
     className: "rc-cta",
-    onClick: markLearned
-  }, "이 ", learnQueue.length, "개 학습 완료 → 시험으로"));
+    onClick: markOneLearned
+  }, "이 문장 학습 완료"));
 }
 function Pips({
   n
