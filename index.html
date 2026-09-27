@@ -21,7 +21,7 @@
 <div id="root"><div id="boot">불러오는 중…</div></div>
 
 <!-- 데이터 칸: 이 파일 자체에 문장·진도가 저장됩니다. 손으로 건드리지 마세요.
-     (Claude API 키는 여기 포함되지 않고 이 브라우저에만 별도로 저장됩니다.) -->
+     (Claude/OpenAI API 키는 여기 포함되지 않고 이 브라우저에만 별도로 저장됩니다.) -->
 <script type="application/json" id="recall-seed">{}</script>
 
 <script>/**
@@ -1112,7 +1112,9 @@ function Study({
     className: "rc-es-row"
   }, React.createElement("div", {
     className: "rc-es"
-  }, card.es)), card.pron && React.createElement("div", {
+  }, card.es), React.createElement(SpeakButton, {
+    text: card.es
+  })), card.pron && React.createElement("div", {
     className: "rc-pron"
   }, card.pron), card.note && React.createElement("div", {
     className: "rc-note"
@@ -1175,6 +1177,7 @@ function LearnMode({
   const atEnd = index === learnQueue.length - 1;
   const onPointerDown = e => {
     if (animating) return;
+    if (e.target.closest(".rc-speak-btn")) return;
     const width = cardRef.current?.offsetWidth || 320;
     stateRef.current = {
       startX: e.clientX,
@@ -1328,7 +1331,9 @@ function LearnMode({
     className: "rc-es-row"
   }, React.createElement("div", {
     className: "rc-es"
-  }, card.es)), card.pron && React.createElement("div", {
+  }, card.es), React.createElement(SpeakButton, {
+    text: card.es
+  })), card.pron && React.createElement("div", {
     className: "rc-pron"
   }, card.pron), card.note && React.createElement("div", {
     className: "rc-note"
@@ -1394,6 +1399,81 @@ function CelebrateBanner({
 }
 const LS_API_KEY = "recall:claude-api-key";
 const AI_MODEL = "claude-sonnet-5";
+const LS_OPENAI_KEY = "recall:openai-api-key";
+const LS_TTS_RELAY = "recall:tts-relay-url";
+const ttsCache = new Map();
+async function playPronunciation(text, onStateChange) {
+  const apiKey = (localStorage.getItem(LS_OPENAI_KEY) || "").trim();
+  const relay = (localStorage.getItem(LS_TTS_RELAY) || "").trim();
+  if (!apiKey || !relay) {
+    onStateChange("error", "설정 탭에서 OpenAI 키와 중계 서버 주소를 먼저 등록해 주세요.");
+    return;
+  }
+  const cached = ttsCache.get(text);
+  if (cached) {
+    onStateChange("playing", "");
+    const audio = new Audio(cached);
+    audio.onended = () => onStateChange("idle", "");
+    audio.play().catch(() => onStateChange("error", "재생하지 못했어요."));
+    return;
+  }
+  onStateChange("loading", "");
+  try {
+    const res = await fetch(relay, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        text
+      })
+    });
+    if (!res.ok) {
+      let msg = `요청 실패 (${res.status})`;
+      try {
+        const j = await res.json();
+        if (j?.error) msg = typeof j.error === "string" ? j.error : "요청 실패";
+      } catch (e) {}
+      onStateChange("error", msg);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    ttsCache.set(text, url);
+    onStateChange("playing", "");
+    const audio = new Audio(url);
+    audio.onended = () => onStateChange("idle", "");
+    audio.play().catch(() => onStateChange("error", "재생하지 못했어요."));
+  } catch (e) {
+    onStateChange("error", "중계 서버에 연결하지 못했어요.");
+  }
+}
+function SpeakButton({
+  text
+}) {
+  const [state, setState] = useState("idle");
+  const [msg, setMsg] = useState("");
+  const onClick = () => {
+    if (state === "loading" || state === "playing") return;
+    playPronunciation(text, (s, m) => {
+      setState(s);
+      setMsg(m || "");
+    });
+  };
+  return React.createElement("span", {
+    className: "rc-speak-wrap"
+  }, React.createElement("button", {
+    type: "button",
+    className: "rc-speak-btn" + (state === "error" ? " err" : ""),
+    onClick: onClick,
+    disabled: state === "loading" || state === "playing",
+    "aria-label": "발음 듣기",
+    title: "발음 듣기"
+  }, state === "loading" ? "…" : state === "playing" ? "▶" : "♪"), state === "error" && React.createElement("span", {
+    className: "rc-speak-err"
+  }, msg));
+}
 function Add({
   cards,
   persist,
@@ -2005,7 +2085,7 @@ function Settings({
     }
   })), fileMsg && React.createElement("div", {
     className: "rc-msg"
-  }, fileMsg), React.createElement(SettingsApiKeySection, null), React.createElement(SettingsGoalSection, {
+  }, fileMsg), React.createElement(SettingsApiKeySection, null), React.createElement(SettingsTtsSection, null), React.createElement(SettingsGoalSection, {
     dailyGoal: dailyGoal,
     saveDailyGoal: saveDailyGoal
   }), React.createElement(SettingsRetentionSection, {
@@ -2064,6 +2144,71 @@ function SettingsApiKeySection() {
     onClick: remove,
     disabled: !localStorage.getItem(LS_API_KEY)
   }, "키 삭제"), saved && key.trim() && React.createElement("span", {
+    className: "rc-apikey-ok"
+  }, "저장됨 ✓")));
+}
+function SettingsTtsSection() {
+  const [key, setKey] = useState(() => localStorage.getItem(LS_OPENAI_KEY) || "");
+  const [relay, setRelay] = useState(() => localStorage.getItem(LS_TTS_RELAY) || "");
+  const [saved, setSaved] = useState(!!localStorage.getItem(LS_OPENAI_KEY));
+  const [show, setShow] = useState(false);
+  const save = () => {
+    localStorage.setItem(LS_OPENAI_KEY, key.trim());
+    localStorage.setItem(LS_TTS_RELAY, relay.trim());
+    setSaved(true);
+  };
+  const remove = () => {
+    localStorage.removeItem(LS_OPENAI_KEY);
+    localStorage.removeItem(LS_TTS_RELAY);
+    setKey("");
+    setRelay("");
+    setSaved(false);
+  };
+  return React.createElement(React.Fragment, null, React.createElement("h3", {
+    className: "rc-h3"
+  }, "발음 듣기 (선택)"), React.createElement("p", {
+    className: "rc-p"
+  }, "시험·학습 화면의 ", React.createElement("b", null, "♪ 버튼"), "으로 스페인어 문장을 OpenAI 음성(tts-1)으로 들을 수 있어요. OpenAI는 브라우저에서 직접 호출을 막아둬서, 본인이 배포한 작은 중계 서버 주소를 통해 요청을 보내요."), React.createElement("p", {
+    className: "rc-p rc-p-mut"
+  }, "키와 서버 주소는 ", React.createElement("b", null, "이 브라우저에만"), " 저장되고, 자체 저장 파일(HTML)에는 포함되지 않아요. 다른 기기·브라우저에서는 다시 입력해 주셔야 해요."), React.createElement("label", {
+    className: "rc-tts-label"
+  }, "중계 서버 주소"), React.createElement("input", {
+    className: "rc-tts-input",
+    value: relay,
+    onChange: e => {
+      setRelay(e.target.value);
+      setSaved(false);
+    },
+    placeholder: "https://내프로젝트.vercel.app/api/tts"
+  }), React.createElement("label", {
+    className: "rc-tts-label"
+  }, "OpenAI API 키"), React.createElement("div", {
+    className: "rc-apikey-row"
+  }, React.createElement("input", {
+    type: show ? "text" : "password",
+    value: key,
+    onChange: e => {
+      setKey(e.target.value);
+      setSaved(false);
+    },
+    placeholder: "sk-..."
+  }), React.createElement("button", {
+    className: "rc-mini ghost",
+    onClick: () => setShow(s => !s)
+  }, show ? "숨기기" : "보기")), React.createElement("div", {
+    className: "rc-file-actions",
+    style: {
+      marginTop: 10
+    }
+  }, React.createElement("button", {
+    className: "rc-mini",
+    onClick: save,
+    disabled: !key.trim() || !relay.trim()
+  }, "저장"), React.createElement("button", {
+    className: "rc-mini ghost",
+    onClick: remove,
+    disabled: !localStorage.getItem(LS_OPENAI_KEY)
+  }, "삭제"), saved && key.trim() && relay.trim() && React.createElement("span", {
     className: "rc-apikey-ok"
   }, "저장됨 ✓")));
 }
@@ -2208,6 +2353,14 @@ function StyleTag() {
 .rc-answer{margin-top:22px;padding-top:20px;border-top:1px dashed var(--line);animation:rise .25s ease}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .rc-es-row{display:flex;align-items:flex-start;gap:12px}
+.rc-speak-wrap{display:flex;flex-direction:column;align-items:flex-start;flex:none}
+.rc-speak-btn{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--surface);
+  color:var(--pine);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  flex:none;transition:.15s}
+.rc-speak-btn:hover:not(:disabled){background:var(--pine);color:#fff;border-color:var(--pine)}
+.rc-speak-btn:disabled{opacity:.6;cursor:default}
+.rc-speak-btn.err{border-color:var(--clay);color:var(--clay)}
+.rc-speak-err{margin-top:4px;font-size:11px;color:var(--clay);max-width:160px;line-height:1.4}
 .rc-es{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:27px;line-height:1.3;color:var(--pine);flex:1}
 .rc-pron{margin-top:8px;font-size:15px;color:var(--marigold);font-weight:500;letter-spacing:.01em}
 .rc-note{margin-top:10px;font-size:14px;color:var(--mut);display:flex;gap:7px;align-items:flex-start;white-space:pre-line}
@@ -2330,6 +2483,10 @@ function StyleTag() {
 .rc-file-state{font-size:12px;color:var(--mut)}
 .rc-file-actions{display:flex;gap:8px;flex-wrap:wrap}
 .rc-apikey-row{display:flex;gap:8px;margin-top:10px}
+.rc-tts-label{display:block;font-size:12px;color:var(--mut);margin-top:14px;margin-bottom:6px}
+.rc-tts-input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+  font:inherit;font-size:13px;background:var(--surface);color:var(--ink)}
+.rc-tts-input:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-color:transparent}
 .rc-apikey-row input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
   font:inherit;font-size:14px;background:var(--surface);color:var(--ink)}
 .rc-apikey-row input:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-color:transparent}
