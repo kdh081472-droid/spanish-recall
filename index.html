@@ -1146,6 +1146,7 @@ function LearnMode({
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [animating, setAnimating] = useState(false);
+  const [revealed, setRevealed] = useState(false);
   const cardRef = React.useRef(null);
   const stateRef = React.useRef({
     startX: 0,
@@ -1177,7 +1178,7 @@ function LearnMode({
   const atEnd = index === learnQueue.length - 1;
   const onPointerDown = e => {
     if (animating) return;
-    if (e.target.closest(".rc-speak-btn")) return;
+    if (e.target.closest(".rc-speak-btn") || e.target.closest(".rc-reveal-toggle")) return;
     const width = cardRef.current?.offsetWidth || 320;
     stateRef.current = {
       startX: e.clientX,
@@ -1316,11 +1317,48 @@ function LearnMode({
     points: "9 18 15 12 9 6"
   })), React.createElement("div", {
     className: "rc-learn-body"
-  }, React.createElement("div", {
+  }, React.createElement("button", {
+    type: "button",
+    className: "rc-reveal-toggle" + (revealed ? " on" : ""),
+    onClick: () => setRevealed(r => !r),
+    "aria-label": revealed ? "정답 가리기" : "정답 보기",
+    title: revealed ? "정답 가리기" : "정답 보기"
+  }, revealed ? React.createElement("svg", {
+    width: "19",
+    height: "19",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, React.createElement("path", {
+    d: "M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+  }), React.createElement("line", {
+    x1: "1",
+    y1: "1",
+    x2: "23",
+    y2: "23"
+  })) : React.createElement("svg", {
+    width: "19",
+    height: "19",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, React.createElement("path", {
+    d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
+  }), React.createElement("circle", {
+    cx: "12",
+    cy: "12",
+    r: "3"
+  }))), React.createElement("div", {
     className: "rc-card-label"
   }, "한국어"), React.createElement("div", {
     className: "rc-ko"
-  }, card.ko), React.createElement("div", {
+  }, card.ko), revealed && React.createElement("div", {
     className: "rc-answer",
     style: {
       marginTop: 22,
@@ -2373,7 +2411,12 @@ function StyleTag() {
   touch-action:pan-y;cursor:grab;user-select:none}
 .rc-learn-card.anim{transition:transform .22s cubic-bezier(.2,.8,.3,1)}
 .rc-learn-card:active{cursor:grabbing}
-.rc-learn-body{padding:30px 24px}
+.rc-learn-body{padding:30px 24px;position:relative}
+.rc-reveal-toggle{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:50%;
+  border:1px solid var(--line);background:var(--paper);color:var(--ink);display:flex;align-items:center;
+  justify-content:center;cursor:pointer;z-index:2}
+.rc-reveal-toggle:hover{background:var(--surface)}
+.rc-reveal-toggle.on{border-color:var(--pine);background:#eef6f4;color:var(--pine)}
 .rc-learn-arrow{position:absolute;top:50%;margin-top:-12px;color:var(--ink);pointer-events:none}
 .rc-learn-arrow.left{left:8px}
 .rc-learn-arrow.right{right:8px}
