@@ -1401,6 +1401,12 @@ const LS_API_KEY = "recall:claude-api-key";
 const AI_MODEL = "claude-sonnet-5";
 const LS_OPENAI_KEY = "recall:openai-api-key";
 const LS_TTS_RELAY = "recall:tts-relay-url";
+const LS_TTS_VOICE = "recall:tts-voice";
+const LS_TTS_SPEED = "recall:tts-speed";
+const TTS_VOICE_DEFAULT = "nova";
+const TTS_SPEED_DEFAULT = 1.0;
+const TTS_VOICES = [["nova", "Nova", "밝고 또렷함"], ["shimmer", "Shimmer", "부드러운 톤"], ["alloy", "Alloy", "중성적, 무난함"], ["echo", "Echo", "차분한 남성적 톤"], ["fable", "Fable", "표현력 있는 편"], ["onyx", "Onyx", "낮고 굵은 톤"]];
+const TTS_SPEEDS = [[0.75, "느리게"], [0.85, "살짝 느리게"], [1.0, "보통"], [1.15, "살짝 빠르게"]];
 const ttsCache = new Map();
 async function playPronunciation(text, onStateChange) {
   const apiKey = (localStorage.getItem(LS_OPENAI_KEY) || "").trim();
@@ -1409,7 +1415,11 @@ async function playPronunciation(text, onStateChange) {
     onStateChange("error", "설정 탭에서 OpenAI 키와 중계 서버 주소를 먼저 등록해 주세요.");
     return;
   }
-  const cached = ttsCache.get(text);
+  const voice = localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT;
+  const speedRaw = parseFloat(localStorage.getItem(LS_TTS_SPEED));
+  const speed = Number.isFinite(speedRaw) ? speedRaw : TTS_SPEED_DEFAULT;
+  const cacheKey = `${voice}|${speed}|${text}`;
+  const cached = ttsCache.get(cacheKey);
   if (cached) {
     onStateChange("playing", "");
     const audio = new Audio(cached);
@@ -1426,7 +1436,9 @@ async function playPronunciation(text, onStateChange) {
         Authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        text
+        text,
+        voice,
+        speed
       })
     });
     if (!res.ok) {
@@ -1440,7 +1452,7 @@ async function playPronunciation(text, onStateChange) {
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    ttsCache.set(text, url);
+    ttsCache.set(cacheKey, url);
     onStateChange("playing", "");
     const audio = new Audio(url);
     audio.onended = () => onStateChange("idle", "");
@@ -2152,6 +2164,11 @@ function SettingsTtsSection() {
   const [relay, setRelay] = useState(() => localStorage.getItem(LS_TTS_RELAY) || "");
   const [saved, setSaved] = useState(!!localStorage.getItem(LS_OPENAI_KEY));
   const [show, setShow] = useState(false);
+  const [voice, setVoiceState] = useState(() => localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT);
+  const [speed, setSpeedState] = useState(() => {
+    const s = parseFloat(localStorage.getItem(LS_TTS_SPEED));
+    return Number.isFinite(s) ? s : TTS_SPEED_DEFAULT;
+  });
   const save = () => {
     localStorage.setItem(LS_OPENAI_KEY, key.trim());
     localStorage.setItem(LS_TTS_RELAY, relay.trim());
@@ -2163,6 +2180,14 @@ function SettingsTtsSection() {
     setKey("");
     setRelay("");
     setSaved(false);
+  };
+  const chooseVoice = v => {
+    setVoiceState(v);
+    localStorage.setItem(LS_TTS_VOICE, v);
+  };
+  const chooseSpeed = s => {
+    setSpeedState(s);
+    localStorage.setItem(LS_TTS_SPEED, String(s));
   };
   return React.createElement(React.Fragment, null, React.createElement("h3", {
     className: "rc-h3"
@@ -2210,7 +2235,37 @@ function SettingsTtsSection() {
     disabled: !localStorage.getItem(LS_OPENAI_KEY)
   }, "삭제"), saved && key.trim() && relay.trim() && React.createElement("span", {
     className: "rc-apikey-ok"
-  }, "저장됨 ✓")));
+  }, "저장됨 ✓")), React.createElement("label", {
+    className: "rc-tts-label",
+    style: {
+      marginTop: 18
+    }
+  }, "목소리"), React.createElement("div", {
+    className: "rc-voice-grid"
+  }, TTS_VOICES.map(([v, name, desc]) => React.createElement("button", {
+    key: v,
+    className: "rc-target" + (voice === v ? " on" : ""),
+    onClick: () => chooseVoice(v)
+  }, React.createElement("span", {
+    className: "t-name"
+  }, name), React.createElement("span", {
+    className: "t-desc"
+  }, desc)))), React.createElement("label", {
+    className: "rc-tts-label",
+    style: {
+      marginTop: 18
+    }
+  }, "배속"), React.createElement("div", {
+    className: "rc-targets"
+  }, TTS_SPEEDS.map(([s, name]) => React.createElement("button", {
+    key: s,
+    className: "rc-target" + (Math.abs(speed - s) < 0.001 ? " on" : ""),
+    onClick: () => chooseSpeed(s)
+  }, React.createElement("span", {
+    className: "t-pct"
+  }, s.toFixed(2), "x"), React.createElement("span", {
+    className: "t-name"
+  }, name)))));
 }
 function SettingsGoalSection({
   dailyGoal,
@@ -2461,6 +2516,10 @@ function StyleTag() {
 .rc-h3:not(:first-child){margin-top:28px}
 .rc-p{font-size:14px;line-height:1.65;color:var(--mut);margin:0}
 .rc-targets{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.rc-voice-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.rc-voice-grid .rc-target{padding:10px}
+.rc-voice-grid .t-name{font-size:13px}
+.rc-voice-grid .t-desc{font-size:11px}
 .rc-goalset-row{display:flex;align-items:center;gap:8px;margin-top:14px}
 .rc-goalset-input{width:80px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
   font:inherit;font-size:16px;text-align:center;background:var(--surface);color:var(--ink)}
@@ -2500,7 +2559,8 @@ function StyleTag() {
   display:flex;justify-content:space-around;padding:11px 16px calc(11px + env(safe-area-inset-bottom, 0px)) 16px;font-size:12px;color:var(--mut)}
 .rc-foot b{color:var(--ink);font-variant-numeric:tabular-nums}
 @media (max-width:480px){.rc-ko{font-size:24px}.rc-es{font-size:23px}.rc-item{flex-direction:column}
-  .rc-item-actions{flex-direction:row;flex-wrap:wrap}.g-label{font-size:13px}.rc-targets{grid-template-columns:1fr}}
+  .rc-item-actions{flex-direction:row;flex-wrap:wrap}.g-label{font-size:13px}.rc-targets{grid-template-columns:1fr}
+  .rc-voice-grid{grid-template-columns:1fr 1fr}}
 `);
 }
 
