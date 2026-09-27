@@ -474,6 +474,19 @@ function fmtInterval(ms) {
   return `${(d / 365).toFixed(1)}년`;
 }
 const fmtLeft = ms => ms <= 0 ? "지금" : fmtInterval(ms) + " 후";
+const LEARN_RESET_FLAG = "recall:learn-reset-v1";
+function applyOneTimeLearnReset(cards) {
+  try {
+    if (localStorage.getItem(LEARN_RESET_FLAG) === "1") return cards;
+    localStorage.setItem(LEARN_RESET_FLAG, "1");
+  } catch (e) {
+    return cards;
+  }
+  return cards.map(c => ({
+    ...c,
+    learned: false
+  }));
+}
 function newCard(ko, es, pron = "", note = "") {
   const now = Date.now();
   return {
@@ -619,7 +632,7 @@ function App() {
           if (raw) seed = JSON.parse(raw);
         } catch (e) {}
         if (seed && Array.isArray(seed.cards) && seed.cards.length) {
-          setCards(seed.cards.map(migrate));
+          persist(applyOneTimeLearnReset(seed.cards.map(migrate)));
           if (typeof seed.target === "number") setTarget(seed.target);
           if (typeof seed.dailyGoal === "number") setDailyGoalState(seed.dailyGoal);
           if (typeof seed.streak === "number") setStreak(seed.streak);
@@ -648,8 +661,8 @@ function App() {
         try {
           const r = await window.storage.get(key);
           if (r?.value) {
-            const migrated = JSON.parse(r.value).map(migrate);
-            setCards(migrated);
+            const migrated = applyOneTimeLearnReset(JSON.parse(r.value).map(migrate));
+            persist(migrated);
             if (!isV3) {
               try {
                 await window.storage.set(KEY_V3, JSON.stringify(migrated));
@@ -1016,7 +1029,14 @@ function Study({
   useEffect(() => setRevealed(false), [cardId]);
   const grade = result => {
     if (!card) return;
-    persist(cards.map(c => c.id === card.id ? schedule(c, result, target) : c));
+    persist(cards.map(c => {
+      if (c.id !== card.id) return c;
+      const scheduled = schedule(c, result, target);
+      return result === "again" ? {
+        ...scheduled,
+        learned: false
+      } : scheduled;
+    }));
     if (result === "good") onGoodAnswer(card.id);
     setAheadId(null);
     setRevealed(false);
