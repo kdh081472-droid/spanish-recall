@@ -456,7 +456,8 @@ function parseImportedText(text) {
     lastGoalDate: typeof obj.lastGoalDate === "string" ? obj.lastGoalDate : null,
     instructions: typeof obj.instructions === "string" ? obj.instructions : null,
     goalIds: Array.isArray(obj.goalIds) ? obj.goalIds : null,
-    goalDate: typeof obj.goalDate === "string" ? obj.goalDate : null
+    goalDate: typeof obj.goalDate === "string" ? obj.goalDate : null,
+    bookmarks: Array.isArray(obj.bookmarks) ? obj.bookmarks : null
   };
 }
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -609,6 +610,7 @@ function App() {
   const [instructions, setInstructions] = useState("");
   const [goalIds, setGoalIds] = useState([]);
   const [goalDate, setGoalDate] = useState(null);
+  const [bookmarks, setBookmarks] = useState([]);
   const [celebrate, setCelebrate] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");
@@ -640,6 +642,7 @@ function App() {
           if (typeof seed.instructions === "string") setInstructions(seed.instructions);
           if (Array.isArray(seed.goalIds)) setGoalIds(seed.goalIds);
           if (typeof seed.goalDate === "string") setGoalDate(seed.goalDate);
+          if (Array.isArray(seed.bookmarks)) setBookmarks(seed.bookmarks);
           setLoaded(true);
           return;
         }
@@ -655,6 +658,7 @@ function App() {
           if (typeof parsed.instructions === "string") setInstructions(parsed.instructions);
           if (Array.isArray(parsed.goalIds)) setGoalIds(parsed.goalIds);
           if (typeof parsed.goalDate === "string") setGoalDate(parsed.goalDate);
+          if (Array.isArray(parsed.bookmarks)) setBookmarks(parsed.bookmarks);
         }
       } catch (e) {}
       for (const [key, isV3] of [[KEY_V3, true], [KEY_V2, false], [KEY_V1, false]]) {
@@ -724,9 +728,10 @@ function App() {
       lastGoalDate,
       instructions,
       goalIds,
-      goalDate
+      goalDate,
+      bookmarks
     });
-  }, [fileHandle, fileStatus, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, writeSelfFile]);
+  }, [fileHandle, fileStatus, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, bookmarks, writeSelfFile]);
   const persistMeta = useCallback(async patch => {
     const next = {
       target,
@@ -736,6 +741,7 @@ function App() {
       instructions,
       goalIds,
       goalDate,
+      bookmarks,
       ...patch
     };
     setTarget(next.target);
@@ -745,11 +751,12 @@ function App() {
     setInstructions(next.instructions);
     setGoalIds(next.goalIds);
     setGoalDate(next.goalDate);
+    setBookmarks(next.bookmarks);
     try {
       await window.storage.set(KEY_SET, JSON.stringify(next));
     } catch (e) {}
     if (fileHandle && fileStatus === "connected") writeSelfFile(fileHandle, cards, next);
-  }, [target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, fileHandle, fileStatus, cards, writeSelfFile]);
+  }, [target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, bookmarks, fileHandle, fileStatus, cards, writeSelfFile]);
   const saveTarget = useCallback(t => persistMeta({
     target: t
   }), [persistMeta]);
@@ -759,6 +766,12 @@ function App() {
   const saveInstructions = useCallback(t => persistMeta({
     instructions: t
   }), [persistMeta]);
+  const addBookmark = useCallback(bm => persistMeta({
+    bookmarks: [...bookmarks, bm]
+  }), [persistMeta, bookmarks]);
+  const removeBookmark = useCallback(id => persistMeta({
+    bookmarks: bookmarks.filter(b => b.id !== id)
+  }), [persistMeta, bookmarks]);
   const recordGood = useCallback(cardId => {
     const today = todayStr();
     const base = goalDate === today ? goalIds : [];
@@ -803,13 +816,14 @@ function App() {
         lastGoalDate,
         instructions,
         goalIds,
-        goalDate
+        goalDate,
+        bookmarks
       });
       setFileMsg("이 파일 하나에 연결했어요. 이제부터 여기에 자동 저장돼요.");
     } catch (e) {
       if (e?.name !== "AbortError") setFileMsg("연결하지 못했어요.");
     }
-  }, [cards, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, writeSelfFile]);
+  }, [cards, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, bookmarks, writeSelfFile]);
   const reconnectSelfFile = useCallback(async () => {
     if (!fileHandle) return;
     try {
@@ -842,7 +856,8 @@ function App() {
       lastGoalDate,
       instructions,
       goalIds,
-      goalDate
+      goalDate,
+      bookmarks
     });
     if (!html) {
       setFileMsg("파일을 만들지 못했어요.");
@@ -860,7 +875,7 @@ function App() {
     a.remove();
     URL.revokeObjectURL(url);
     setFileMsg("데이터가 담긴 파일을 다운로드했어요. 기존 파일을 이걸로 바꿔주세요.");
-  }, [cards, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate]);
+  }, [cards, target, dailyGoal, streak, lastGoalDate, instructions, goalIds, goalDate, bookmarks]);
   const importFile = useCallback(async file => {
     try {
       const text = await file.text();
@@ -872,7 +887,8 @@ function App() {
         lastGoalDate: loadedLGD,
         instructions: loadedInstr,
         goalIds: loadedGoalIds,
-        goalDate: loadedGoalDate
+        goalDate: loadedGoalDate,
+        bookmarks: loadedBookmarks
       } = parseImportedText(text);
       persist(loadedCards);
       persistMeta({
@@ -896,6 +912,9 @@ function App() {
         } : {}),
         ...(loadedGoalDate != null ? {
           goalDate: loadedGoalDate
+        } : {}),
+        ...(loadedBookmarks != null ? {
+          bookmarks: loadedBookmarks
         } : {})
       });
       setFileMsg(`가져왔어요 (${loadedCards.length}개).`);
@@ -944,7 +963,7 @@ function App() {
     className: "rc-sub"
   }, "난이도·안정성 모델 · 목표 정답률 스케줄링"))), React.createElement("nav", {
     className: "rc-tabs"
-  }, [["learn", "학습", learnQueue.length], ["test", "시험", dueCards.length], ["add", "추가", null], ["list", "목록", cards.length], ["settings", "설정", null]].map(([k, label, n]) => React.createElement("button", {
+  }, [["learn", "학습", learnQueue.length], ["test", "시험", dueCards.length], ["add", "추가", null], ["list", "목록", cards.length], ["bookmarks", "북마크", bookmarks.length], ["settings", "설정", null]].map(([k, label, n]) => React.createElement("button", {
     key: k,
     className: "rc-tab" + (tab === k ? " on" : ""),
     onClick: () => setTab(k)
@@ -979,11 +998,15 @@ function App() {
     cards: cards,
     persist: persist,
     instructions: instructions,
-    saveInstructions: saveInstructions
+    saveInstructions: saveInstructions,
+    onBookmark: addBookmark
   }) : tab === "list" ? React.createElement(ListView, {
     cards: cards,
     persist: persist,
     now: now
+  }) : tab === "bookmarks" ? React.createElement(BookmarksView, {
+    bookmarks: bookmarks,
+    removeBookmark: removeBookmark
   }) : React.createElement(Settings, {
     target: target,
     saveTarget: saveTarget,
@@ -1440,18 +1463,20 @@ const AI_MODEL = "claude-sonnet-5";
 const LS_OPENAI_KEY = "recall:openai-api-key";
 const LS_TTS_RELAY = "recall:tts-relay-url";
 const LS_TTS_VOICE = "recall:tts-voice";
+const LS_TTS_VOICE_B = "recall:tts-voice-b";
 const LS_TTS_SPEED = "recall:tts-speed";
 const TTS_VOICE_DEFAULT = "nova";
+const TTS_VOICE_B_DEFAULT = "onyx";
 const TTS_SPEED_DEFAULT = 1.0;
 const TTS_VOICES = [["nova", "Nova", "밝고 또렷함"], ["shimmer", "Shimmer", "부드러운 톤"], ["alloy", "Alloy", "중성적, 무난함"], ["echo", "Echo", "차분한 남성적 톤"], ["fable", "Fable", "표현력 있는 편"], ["onyx", "Onyx", "낮고 굵은 톤"]];
 const TTS_SPEEDS = [[0.75, "느리게"], [0.85, "살짝 느리게"], [1.0, "보통"], [1.15, "살짝 빠르게"]];
 const ttsCache = new Map();
 const TTS_LOOP_GAP_MS = 800;
-async function fetchTtsUrl(text) {
+async function fetchTtsUrl(text, voiceOverride) {
   const apiKey = (localStorage.getItem(LS_OPENAI_KEY) || "").trim();
   const relay = (localStorage.getItem(LS_TTS_RELAY) || "").trim();
   if (!apiKey || !relay) throw new Error("설정 탭에서 OpenAI 키와 중계 서버 주소를 먼저 등록해 주세요.");
-  const voice = localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT;
+  const voice = voiceOverride || localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT;
   const speedRaw = parseFloat(localStorage.getItem(LS_TTS_SPEED));
   const speed = Number.isFinite(speedRaw) ? speedRaw : TTS_SPEED_DEFAULT;
   const cacheKey = `${voice}|${speed}|${text}`;
@@ -1483,7 +1508,8 @@ async function fetchTtsUrl(text) {
   return url;
 }
 function SpeakButton({
-  text
+  text,
+  voiceOverride
 }) {
   const [state, setState] = useState("idle");
   const [msg, setMsg] = useState("");
@@ -1522,11 +1548,11 @@ function SpeakButton({
   const start = async () => {
     stoppedRef.current = false;
     try {
-      const cacheKey = (localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT) + "|" + (localStorage.getItem(LS_TTS_SPEED) || TTS_SPEED_DEFAULT) + "|" + text;
+      const cacheKey = (voiceOverride || localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT) + "|" + (localStorage.getItem(LS_TTS_SPEED) || TTS_SPEED_DEFAULT) + "|" + text;
       let url = ttsCache.get(cacheKey);
       if (!url) {
         setState("loading");
-        url = await fetchTtsUrl(text);
+        url = await fetchTtsUrl(text, voiceOverride);
       }
       if (stoppedRef.current) return;
       setState("playing");
@@ -1558,11 +1584,133 @@ function SpeakButton({
     className: "rc-speak-err"
   }, msg));
 }
+function DialoguePlayButton({
+  lines
+}) {
+  const [state, setState] = useState("idle");
+  const [msg, setMsg] = useState("");
+  const audioRef = React.useRef(null);
+  const timerRef = React.useRef(null);
+  const stoppedRef = React.useRef(true);
+  const stop = React.useCallback(() => {
+    stoppedRef.current = true;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setState("idle");
+  }, []);
+  useEffect(() => () => stop(), [lines, stop]);
+  const voiceFor = speaker => speaker === "B" ? localStorage.getItem(LS_TTS_VOICE_B) || TTS_VOICE_B_DEFAULT : localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT;
+  const playFrom = React.useCallback(async i => {
+    if (stoppedRef.current) return;
+    if (i >= lines.length) {
+      stoppedRef.current = true;
+      setState("idle");
+      return;
+    }
+    const line = lines[i];
+    try {
+      setState("loading");
+      const url = await fetchTtsUrl(line.es, voiceFor(line.speaker));
+      if (stoppedRef.current) return;
+      setState("playing");
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        if (stoppedRef.current) return;
+        timerRef.current = setTimeout(() => {
+          if (!stoppedRef.current) playFrom(i + 1);
+        }, TTS_LOOP_GAP_MS);
+      };
+      audio.play().catch(() => {
+        stoppedRef.current = true;
+        setState("error");
+        setMsg("재생하지 못했어요.");
+      });
+    } catch (e) {
+      stoppedRef.current = true;
+      setState("error");
+      setMsg(e?.message || "중계 서버에 연결하지 못했어요.");
+    }
+  }, [lines]);
+  const onClick = () => {
+    if (state === "loading") return;
+    if (state === "playing") {
+      stop();
+      return;
+    }
+    stoppedRef.current = false;
+    playFrom(0);
+  };
+  return React.createElement("div", {
+    className: "rc-dialogue-play"
+  }, React.createElement("button", {
+    type: "button",
+    className: "rc-mini" + (state === "playing" ? " on" : ""),
+    onClick: onClick,
+    disabled: state === "loading"
+  }, state === "loading" ? "…" : state === "playing" ? "■ 멈추기" : "▶ 전체 대화 듣기"), state === "error" && React.createElement("span", {
+    className: "rc-speak-err"
+  }, msg));
+}
+function AskResultView({
+  message,
+  phrases
+}) {
+  const hasSpeakers = phrases?.some(p => p.speaker === "A" || p.speaker === "B");
+  return React.createElement("div", {
+    className: "rc-ask-result"
+  }, React.createElement("p", {
+    className: "rc-ask-message"
+  }, message), phrases && phrases.length > 0 && React.createElement("div", {
+    className: "rc-ask-phrases"
+  }, hasSpeakers && React.createElement(DialoguePlayButton, {
+    lines: phrases.filter(p => p.es)
+  }), hasSpeakers ? React.createElement("div", {
+    className: "rc-chat"
+  }, phrases.map((p, i) => React.createElement("div", {
+    key: i,
+    className: "rc-chat-bubble" + (p.speaker === "B" ? " right" : " left")
+  }, React.createElement("div", {
+    className: "rc-chat-speaker"
+  }, p.speaker || "A"), React.createElement("div", {
+    className: "rc-chat-row"
+  }, React.createElement("div", {
+    className: "rc-chat-text"
+  }, React.createElement("div", {
+    className: "rc-chat-es"
+  }, p.es), p.pron && React.createElement("div", {
+    className: "rc-chat-pron"
+  }, p.pron)), React.createElement(SpeakButton, {
+    text: p.es,
+    voiceOverride: p.speaker === "B" ? localStorage.getItem(LS_TTS_VOICE_B) || TTS_VOICE_B_DEFAULT : undefined
+  }))))) : React.createElement("div", {
+    className: "rc-phrase-list"
+  }, phrases.map((p, i) => React.createElement("div", {
+    key: i,
+    className: "rc-phrase-card"
+  }, React.createElement("div", {
+    className: "rc-phrase-row"
+  }, React.createElement("div", {
+    className: "rc-phrase-es"
+  }, p.es), React.createElement(SpeakButton, {
+    text: p.es
+  })), p.pron && React.createElement("div", {
+    className: "rc-phrase-pron"
+  }, p.pron))))));
+}
 function Add({
   cards,
   persist,
   instructions,
-  saveInstructions
+  saveInstructions,
+  onBookmark
 }) {
   const [ko, setKo] = useState("");
   const [es, setEs] = useState("");
@@ -1575,6 +1723,11 @@ function Add({
   const [aiLoading, setAiLoading] = useState(false);
   const [showInstr, setShowInstr] = useState(false);
   const [draftInstr, setDraftInstr] = useState(instructions || "");
+  const [askText, setAskText] = useState("");
+  const [askLoading, setAskLoading] = useState(false);
+  const [askResult, setAskResult] = useState(null);
+  const [askSaved, setAskSaved] = useState(false);
+  const [askMsg, setAskMsg] = useState("");
   const openInstructions = () => {
     setDraftInstr(instructions || "");
     setShowInstr(true);
@@ -1721,6 +1874,77 @@ function Add({
       setAiLoading(false);
     }
   };
+  const runAskQuestion = async () => {
+    const apiKey = (localStorage.getItem(LS_API_KEY) || "").trim();
+    if (!apiKey) {
+      setAskMsg("먼저 설정 탭에서 Claude API 키를 등록해 주세요.");
+      return;
+    }
+    if (!askText.trim()) {
+      setAskMsg("질문이나 부탁을 입력해 주세요.");
+      return;
+    }
+    setAskLoading(true);
+    setAskMsg("");
+    setAskResult(null);
+    try {
+      const reference = cards.slice(0, 300).map(c => `${c.ko} = ${c.es}`).join("\n");
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          max_tokens: 2000,
+          system: "You help a Korean learner of conversational Mexican Spanish inside their personal flashcard app. " + "You're given the sentences they've already saved (Korean = Spanish) as reference context — draw on this vocabulary naturally where it fits, but you're not limited to only these words. " + "The user may ask you anything related to their studying: suggesting things to say to someone, summarizing what they've been practicing, explaining grammar, or writing a short two-person practice dialogue. " + "Respond with ONLY a raw JSON object with exactly two keys: " + '"message" — a natural, conversational Korean-language reply to the request (explanation, suggestion, or a short intro to the phrases/dialogue below). ' + '"phrases" — an array of relevant Spanish expressions, each an object with "es" (the Spanish text), "pron" (Korean-hangul phonetic transcription, Mexican pronunciation), and "speaker". ' + 'If the user asked for a two-person dialogue/conversation, set "speaker" to alternating "A"/"B" for each line in order; otherwise set "speaker" to "". ' + "Use an empty array for phrases if the reply doesn't call for specific Spanish expressions (e.g. a purely informational answer). " + "No markdown fences, no prose outside the JSON object.",
+          messages: [{
+            role: "user",
+            content: (reference ? `[참고: 지금까지 저장한 문장들]\n${reference}\n\n` : "") + `[질문]\n${askText}`
+          }]
+        })
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        if (res.status === 401) throw new Error("API 키가 올바르지 않아요.");
+        if (res.status === 429) throw new Error("요청이 너무 잦아요. 잠시 후 다시 시도해 주세요.");
+        throw new Error(`요청 실패 (${res.status})`);
+      }
+      const data = await res.json();
+      const textBlock = (data.content || []).find(b => b.type === "text");
+      if (!textBlock) throw new Error("응답에서 결과를 찾지 못했어요.");
+      const cleaned = textBlock.text.trim().replace(/^```json\s*|^```\s*|```$/g, "");
+      const parsed = JSON.parse(cleaned);
+      const message = (parsed.message || "").toString();
+      const phrases = Array.isArray(parsed.phrases) ? parsed.phrases.map(p => ({
+        es: (p.es || "").toString().trim(),
+        pron: (p.pron || "").toString().trim(),
+        speaker: p.speaker === "A" || p.speaker === "B" ? p.speaker : ""
+      })).filter(p => p.es) : [];
+      if (!message && !phrases.length) throw new Error("응답을 이해하지 못했어요.");
+      setAskResult({
+        id: uid(),
+        question: askText,
+        message,
+        phrases,
+        created: Date.now()
+      });
+      setAskSaved(false);
+      setAskText("");
+    } catch (e) {
+      setAskMsg("질문 실패: " + (e?.message || "알 수 없는 오류"));
+    } finally {
+      setAskLoading(false);
+    }
+  };
+  const bookmarkResult = () => {
+    if (!askResult) return;
+    onBookmark(askResult);
+    setAskSaved(true);
+  };
   return React.createElement("div", {
     className: "rc-add"
   }, React.createElement("div", {
@@ -1734,7 +1958,10 @@ function Add({
   }, "표로 붙여넣기"), React.createElement("button", {
     className: mode === "ai" ? "on" : "",
     onClick: () => setMode("ai")
-  }, "AI 번역·정리")), mode === "one" && React.createElement("div", {
+  }, "AI 번역·정리"), React.createElement("button", {
+    className: mode === "ask" ? "on" : "",
+    onClick: () => setMode("ask")
+  }, "AI에게 물어보기")), mode === "one" && React.createElement("div", {
     className: "rc-form"
   }, React.createElement("label", null, "한국어 (내가 하고 싶은 말)"), React.createElement("textarea", {
     value: ko,
@@ -1832,7 +2059,29 @@ function Add({
   }, "저장"), React.createElement("button", {
     className: "rc-mini ghost",
     onClick: closeInstructions
-  }, "취소")))), gridRows.length > 0 && React.createElement("div", {
+  }, "취소")))), mode === "ask" && React.createElement("div", {
+    className: "rc-form"
+  }, React.createElement("label", null, "저장된 문장들을 참고해서 ", React.createElement("b", null, "자유롭게 질문하거나 부탁"), "해보세요. \"대화문으로 해줘\" 같은 요청을 하면 두 사람이 주고받는 대화로 만들어줘요."), React.createElement("textarea", {
+    value: askText,
+    onChange: e => setAskText(e.target.value),
+    rows: 4,
+    placeholder: "예) 지금까지 저장된 문장들 참고해서 몬세한테 할 말 2가지 추천해줘\n예) 카페에서 주문하는 짧은 대화문으로 만들어줘"
+  }), React.createElement("button", {
+    className: "rc-cta",
+    onClick: runAskQuestion,
+    disabled: askLoading
+  }, askLoading ? "물어보는 중…" : "Claude로 물어보기"), askMsg && React.createElement("div", {
+    className: "rc-msg"
+  }, askMsg), askResult && React.createElement("div", {
+    className: "rc-ask-result-wrap"
+  }, React.createElement(AskResultView, {
+    message: askResult.message,
+    phrases: askResult.phrases
+  }), React.createElement("button", {
+    className: "rc-mini",
+    onClick: bookmarkResult,
+    disabled: askSaved
+  }, askSaved ? "북마크됨 ✓" : "★ 북마크"))), gridRows.length > 0 && React.createElement("div", {
     className: "rc-gridwrap"
   }, React.createElement("table", {
     className: "rc-grid"
@@ -2067,6 +2316,47 @@ function ListView({
     }, "삭제"))));
   }));
 }
+function BookmarksView({
+  bookmarks,
+  removeBookmark
+}) {
+  const [confirmId, setConfirmId] = useState(null);
+  if (bookmarks.length === 0) return React.createElement("div", {
+    className: "rc-empty"
+  }, React.createElement("p", {
+    className: "rc-empty-big"
+  }, "아직 북마크한 게 없어요."), React.createElement("p", null, "추가 탭의 \"AI에게 물어보기\"에서 받은 답변을 북마크하면 여기 쌓여요."));
+  const sorted = [...bookmarks].sort((a, b) => b.created - a.created);
+  return React.createElement("div", {
+    className: "rc-bookmarks"
+  }, sorted.map(b => React.createElement("div", {
+    key: b.id,
+    className: "rc-bookmark-item"
+  }, React.createElement("div", {
+    className: "rc-bookmark-head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "rc-bookmark-q"
+  }, b.question), React.createElement("div", {
+    className: "rc-bookmark-date"
+  }, new Date(b.created).toLocaleDateString("ko-KR"))), confirmId === b.id ? React.createElement("div", {
+    className: "rc-file-actions"
+  }, React.createElement("button", {
+    className: "rc-mini danger",
+    onClick: () => {
+      removeBookmark(b.id);
+      setConfirmId(null);
+    }
+  }, "삭제 확인"), React.createElement("button", {
+    className: "rc-mini ghost",
+    onClick: () => setConfirmId(null)
+  }, "취소")) : React.createElement("button", {
+    className: "rc-mini danger",
+    onClick: () => setConfirmId(b.id)
+  }, "삭제")), React.createElement(AskResultView, {
+    message: b.message,
+    phrases: b.phrases
+  }))));
+}
 function Settings({
   target,
   saveTarget,
@@ -2237,6 +2527,7 @@ function SettingsTtsSection() {
   const [saved, setSaved] = useState(!!localStorage.getItem(LS_OPENAI_KEY));
   const [show, setShow] = useState(false);
   const [voice, setVoiceState] = useState(() => localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT);
+  const [voiceB, setVoiceBState] = useState(() => localStorage.getItem(LS_TTS_VOICE_B) || TTS_VOICE_B_DEFAULT);
   const [speed, setSpeedState] = useState(() => {
     const s = parseFloat(localStorage.getItem(LS_TTS_SPEED));
     return Number.isFinite(s) ? s : TTS_SPEED_DEFAULT;
@@ -2256,6 +2547,10 @@ function SettingsTtsSection() {
   const chooseVoice = v => {
     setVoiceState(v);
     localStorage.setItem(LS_TTS_VOICE, v);
+  };
+  const chooseVoiceB = v => {
+    setVoiceBState(v);
+    localStorage.setItem(LS_TTS_VOICE_B, v);
   };
   const chooseSpeed = s => {
     setSpeedState(s);
@@ -2318,6 +2613,23 @@ function SettingsTtsSection() {
     key: v,
     className: "rc-target" + (voice === v ? " on" : ""),
     onClick: () => chooseVoice(v)
+  }, React.createElement("span", {
+    className: "t-name"
+  }, name), React.createElement("span", {
+    className: "t-desc"
+  }, desc)))), React.createElement("label", {
+    className: "rc-tts-label",
+    style: {
+      marginTop: 18
+    }
+  }, "화자 B 목소리 ", React.createElement("span", {
+    className: "rc-tts-label-sub"
+  }, "(대화문 질문에서 상대방 역할)")), React.createElement("div", {
+    className: "rc-voice-grid"
+  }, TTS_VOICES.map(([v, name, desc]) => React.createElement("button", {
+    key: v,
+    className: "rc-target" + (voiceB === v ? " on" : ""),
+    onClick: () => chooseVoiceB(v)
   }, React.createElement("span", {
     className: "t-name"
   }, name), React.createElement("span", {
@@ -2424,12 +2736,12 @@ function StyleTag() {
   font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:22px;display:grid;place-items:center;flex:none}
 .rc-title{font-weight:700;font-size:16px;letter-spacing:-.01em}
 .rc-sub{font-size:12px;color:var(--mut)}
-.rc-tabs{display:flex;gap:5px}
-.rc-tab{flex:1;padding:8px 3px;border:1px solid var(--line);background:var(--surface);border-radius:9px;
-  font:inherit;font-size:12px;color:var(--mut);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;transition:.15s;white-space:nowrap}
+.rc-tabs{display:flex;gap:4px}
+.rc-tab{flex:1;padding:7px 2px;border:1px solid var(--line);background:var(--surface);border-radius:9px;
+  font:inherit;font-size:11px;color:var(--mut);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:3px;transition:.15s;white-space:nowrap}
 .rc-tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
-.rc-badge{background:var(--marigold);color:#2a1c00;font-size:10px;font-weight:700;min-width:16px;height:16px;
-  border-radius:8px;display:grid;place-items:center;padding:0 4px}
+.rc-badge{background:var(--marigold);color:#2a1c00;font-size:9px;font-weight:700;min-width:14px;height:14px;
+  border-radius:7px;display:grid;place-items:center;padding:0 3px}
 .rc-err{background:#fdecea;color:#a3271a;padding:8px 12px;border-radius:8px;margin-top:10px;font-size:13px}
 
 .rc-learn{padding:22px 0;display:flex;flex-direction:column;gap:12px}
@@ -2516,8 +2828,8 @@ function StyleTag() {
   font:inherit;font-size:15px;font-weight:600;cursor:pointer}
 .rc-cta.ghost{background:transparent;color:var(--pine);border:1px solid var(--pine)}
 .rc-add{padding:22px 0}
-.rc-seg{display:flex;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:4px;margin-bottom:18px}
-.rc-seg button{flex:1;padding:10px;border:none;background:transparent;border-radius:9px;font:inherit;font-size:14px;color:var(--mut);cursor:pointer}
+.rc-seg{display:flex;gap:5px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:4px;margin-bottom:18px}
+.rc-seg button{flex:1;padding:9px 4px;border:none;background:transparent;border-radius:9px;font:inherit;font-size:12px;color:var(--mut);cursor:pointer;line-height:1.3}
 .rc-seg button.on{background:var(--ink);color:#fff}
 .rc-form{display:flex;flex-direction:column;gap:8px}
 .rc-form label{font-size:13px;color:var(--mut);margin-top:6px}
@@ -2621,6 +2933,41 @@ function StyleTag() {
 .rc-file-actions{display:flex;gap:8px;flex-wrap:wrap}
 .rc-apikey-row{display:flex;gap:8px;margin-top:10px}
 .rc-tts-label{display:block;font-size:12px;color:var(--mut);margin-top:14px;margin-bottom:6px}
+.rc-tts-label-sub{font-weight:400;color:var(--mut);font-size:11px}
+
+.rc-ask-result-wrap{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.rc-ask-result{display:flex;flex-direction:column;gap:12px}
+.rc-ask-message{font-size:14px;line-height:1.65;color:var(--ink);white-space:pre-line;margin:0}
+.rc-ask-phrases{display:flex;flex-direction:column;gap:10px}
+
+.rc-phrase-list{display:flex;flex-direction:column;gap:8px}
+.rc-phrase-card{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 14px}
+.rc-phrase-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.rc-phrase-es{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:17px;color:var(--pine);flex:1;line-height:1.35}
+.rc-phrase-pron{margin-top:4px;font-size:12px;color:var(--marigold);font-weight:500}
+
+.rc-dialogue-play{display:flex;align-items:center;gap:8px}
+.rc-mini.on{background:var(--pine);color:#fff;border-color:var(--pine)}
+
+.rc-chat{display:flex;flex-direction:column;gap:10px}
+.rc-chat-bubble{display:flex;flex-direction:column;max-width:84%}
+.rc-chat-bubble.left{align-self:flex-start;align-items:flex-start}
+.rc-chat-bubble.right{align-self:flex-end;align-items:flex-end}
+.rc-chat-speaker{font-size:10px;font-weight:700;color:var(--mut);margin-bottom:3px;padding:0 4px}
+.rc-chat-row{display:flex;align-items:flex-end;gap:8px}
+.rc-chat-bubble.right .rc-chat-row{flex-direction:row-reverse}
+.rc-chat-text{border-radius:16px;padding:10px 14px;background:var(--surface);border:1px solid var(--line)}
+.rc-chat-bubble.right .rc-chat-text{background:#eef6f4;border-color:#cfe6e0}
+.rc-chat-es{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:15px;color:var(--pine);line-height:1.35}
+.rc-chat-pron{margin-top:3px;font-size:11px;color:var(--marigold);font-weight:500}
+
+.rc-bookmarks{display:flex;flex-direction:column;gap:16px;padding:18px 0}
+.rc-bookmark-item{border:1px solid var(--line);border-radius:16px;padding:16px;background:var(--surface);
+  display:flex;flex-direction:column;gap:14px}
+.rc-bookmark-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.rc-bookmark-q{font-size:14px;font-weight:700;color:var(--ink);line-height:1.4}
+.rc-bookmark-date{margin-top:3px;font-size:11px;color:var(--mut)}
+.rc-mini.danger{color:var(--clay);border-color:var(--clay)}
 .rc-tts-input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
   font:inherit;font-size:13px;background:var(--surface);color:var(--ink)}
 .rc-tts-input:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-color:transparent}
