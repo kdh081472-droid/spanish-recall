@@ -2230,7 +2230,7 @@ function ListView({
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
-  let filtered = cards.filter(c => !q || c.ko.includes(q) || c.es.toLowerCase().includes(q.toLowerCase()) || c.note.includes(q));
+  let filtered = cards.filter(c => wordsMatch([c.ko, c.es, c.note], q));
   filtered.sort((a, b) => sort === "hard" ? b.D - a.D : sort === "new" ? b.created - a.created : a.due - b.due);
   const remove = id => {
     persist(cards.filter(c => c.id !== id));
@@ -2418,11 +2418,14 @@ function ListView({
 function bookmarkTitle(b) {
   return b.title || b.question || "제목 없음";
 }
+function wordsMatch(haystackParts, q) {
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const hay = haystackParts.join(" ").toLowerCase();
+  return words.every(w => hay.includes(w));
+}
 function bookmarkMatches(b, q) {
-  if (!q) return true;
-  const needle = q.toLowerCase();
-  const hay = [bookmarkTitle(b), b.question || "", b.message || "", ...(b.phrases || []).flatMap(p => [p.es || "", p.ko || ""])].join(" ").toLowerCase();
-  return hay.includes(needle);
+  return wordsMatch([bookmarkTitle(b), b.question || "", b.message || "", ...(b.phrases || []).flatMap(p => [p.es || "", p.ko || ""])], q);
 }
 const BookmarksView = React.memo(function BookmarksView({
   bookmarks,
