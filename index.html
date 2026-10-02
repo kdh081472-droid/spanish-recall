@@ -1936,11 +1936,27 @@ const Add = React.memo(function Add({
       setAskMsg("질문이나 부탁을 입력해 주세요.");
       return;
     }
+    const isRevision = !!askResult;
     setAskLoading(true);
     setAskMsg("");
-    setAskResult(null);
     try {
       const reference = cards.slice(0, 300).map(c => `${c.ko} = ${c.es}`).join("\n");
+      const messages = isRevision ? [{
+        role: "user",
+        content: (reference ? `[참고: 지금까지 저장한 문장들]\n${reference}\n\n` : "") + `[질문]\n${askResult.question}`
+      }, {
+        role: "assistant",
+        content: JSON.stringify({
+          message: askResult.message,
+          phrases: askResult.phrases
+        })
+      }, {
+        role: "user",
+        content: `[수정 요청]\n${askText}\n\n위 내용을 이 요청에 맞게 고쳐서, 전체를 같은 JSON 형식으로 다시 출력해줘.`
+      }] : [{
+        role: "user",
+        content: (reference ? `[참고: 지금까지 저장한 문장들]\n${reference}\n\n` : "") + `[질문]\n${askText}`
+      }];
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -1952,11 +1968,8 @@ const Add = React.memo(function Add({
         body: JSON.stringify({
           model: AI_MODEL,
           max_tokens: 2000,
-          system: "You help a Korean learner of conversational Mexican Spanish inside their personal flashcard app. " + "You're given the sentences they've already saved (Korean = Spanish) as reference context — draw on this vocabulary naturally where it fits, but you're not limited to only these words. " + "The user may ask you anything related to their studying: suggesting things to say to someone, summarizing what they've been practicing, explaining grammar, or writing a short two-person practice dialogue. " + "Respond with ONLY a raw JSON object with exactly two keys: " + '"message" — a natural, conversational Korean-language reply to the request (explanation, suggestion, or a short intro to the phrases/dialogue below). ' + '"phrases" — an array of relevant Spanish expressions, each an object with "es" (the Spanish text), "ko" (natural Korean translation of that line), "pron" (Korean-hangul phonetic transcription, Mexican pronunciation), and "speaker". ' + 'If the user asked for a two-person dialogue/conversation, set "speaker" to alternating "A"/"B" for each line in order; otherwise set "speaker" to "". ' + "Use an empty array for phrases if the reply doesn't call for specific Spanish expressions (e.g. a purely informational answer). " + "No markdown fences, no prose outside the JSON object.",
-          messages: [{
-            role: "user",
-            content: (reference ? `[참고: 지금까지 저장한 문장들]\n${reference}\n\n` : "") + `[질문]\n${askText}`
-          }]
+          system: "You help a Korean learner of conversational Mexican Spanish inside their personal flashcard app. " + "You're given the sentences they've already saved (Korean = Spanish) as reference context — draw on this vocabulary naturally where it fits, but you're not limited to only these words. " + "The user may ask you anything related to their studying: suggesting things to say to someone, summarizing what they've been practicing, explaining grammar, or writing a short two-person practice dialogue. " + "The conversation may include a JSON reply you gave earlier, followed by a follow-up request to revise it (e.g. swap who says what, change a line, make it shorter) — make the requested change and reply with the complete updated object again, same schema, not just the diff. " + "Respond with ONLY a raw JSON object with exactly two keys: " + '"message" — a natural, conversational Korean-language reply to the request (explanation, suggestion, or a short intro to the phrases/dialogue below). ' + '"phrases" — an array of relevant Spanish expressions, each an object with "es" (the Spanish text), "ko" (natural Korean translation of that line), "pron" (Korean-hangul phonetic transcription, Mexican pronunciation), and "speaker". ' + 'If the user asked for a two-person dialogue/conversation, set "speaker" to alternating "A"/"B" for each line in order; otherwise set "speaker" to "". ' + "Use an empty array for phrases if the reply doesn't call for specific Spanish expressions (e.g. a purely informational answer). " + "No markdown fences, no prose outside the JSON object.",
+          messages
         })
       });
       if (!res.ok) {
@@ -1997,6 +2010,12 @@ const Add = React.memo(function Add({
     if (!askResult) return;
     onBookmark(askResult);
     setAskSaved(true);
+  };
+  const startNewQuestion = () => {
+    setAskResult(null);
+    setAskText("");
+    setAskMsg("");
+    setAskSaved(false);
   };
   return React.createElement("div", {
     className: "rc-add"
@@ -2114,7 +2133,34 @@ const Add = React.memo(function Add({
     onClick: closeInstructions
   }, "취소")))), mode === "ask" && React.createElement("div", {
     className: "rc-form"
-  }, React.createElement("label", null, "저장된 문장들을 참고해서 ", React.createElement("b", null, "자유롭게 질문하거나 부탁"), "해보세요. \"대화문으로 해줘\" 같은 요청을 하면 두 사람이 주고받는 대화로 만들어줘요."), React.createElement("textarea", {
+  }, askResult ? React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "rc-ask-result-wrap"
+  }, React.createElement(AskResultView, {
+    message: askResult.message,
+    phrases: askResult.phrases
+  }), React.createElement("div", {
+    className: "rc-file-actions"
+  }, React.createElement("button", {
+    className: "rc-mini",
+    onClick: bookmarkResult,
+    disabled: askSaved
+  }, askSaved ? "북마크됨 ✓" : "★ 북마크"), React.createElement("button", {
+    className: "rc-mini ghost",
+    onClick: startNewQuestion
+  }, "새로 질문하기"))), React.createElement("label", {
+    style: {
+      marginTop: 14
+    }
+  }, "이 결과를 ", React.createElement("b", null, "수정 요청"), "해보세요 (예: \"A랑 B 역할 바꿔줘\", \"더 짧게 해줘\")."), React.createElement("textarea", {
+    value: askText,
+    onChange: e => setAskText(e.target.value),
+    rows: 3,
+    placeholder: "예) A랑 B 역할 바꿔줘\n예) 좀 더 캐주얼한 말투로 바꿔줘"
+  }), React.createElement("button", {
+    className: "rc-cta",
+    onClick: runAskQuestion,
+    disabled: askLoading
+  }, askLoading ? "수정하는 중…" : "Claude에게 수정 요청")) : React.createElement(React.Fragment, null, React.createElement("label", null, "저장된 문장들을 참고해서 ", React.createElement("b", null, "자유롭게 질문하거나 부탁"), "해보세요. \"대화문으로 해줘\" 같은 요청을 하면 두 사람이 주고받는 대화로 만들어줘요."), React.createElement("textarea", {
     value: askText,
     onChange: e => setAskText(e.target.value),
     rows: 4,
@@ -2123,18 +2169,9 @@ const Add = React.memo(function Add({
     className: "rc-cta",
     onClick: runAskQuestion,
     disabled: askLoading
-  }, askLoading ? "물어보는 중…" : "Claude로 물어보기"), askMsg && React.createElement("div", {
+  }, askLoading ? "물어보는 중…" : "Claude로 물어보기")), askMsg && React.createElement("div", {
     className: "rc-msg"
-  }, askMsg), askResult && React.createElement("div", {
-    className: "rc-ask-result-wrap"
-  }, React.createElement(AskResultView, {
-    message: askResult.message,
-    phrases: askResult.phrases
-  }), React.createElement("button", {
-    className: "rc-mini",
-    onClick: bookmarkResult,
-    disabled: askSaved
-  }, askSaved ? "북마크됨 ✓" : "★ 북마크"))), gridRows.length > 0 && React.createElement("div", {
+  }, askMsg)), gridRows.length > 0 && React.createElement("div", {
     className: "rc-gridwrap"
   }, React.createElement("table", {
     className: "rc-grid"
