@@ -1177,6 +1177,7 @@ function LearnMode({
   const [dragging, setDragging] = useState(false);
   const [animating, setAnimating] = useState(false);
   const [revealed, setRevealed] = useState(false);
+  const [query, setQuery] = useState("");
   const cardRef = React.useRef(null);
   const stateRef = React.useRef({
     startX: 0,
@@ -1184,9 +1185,14 @@ function LearnMode({
     lock: "none",
     width: 320
   });
+  const visibleQueue = query ? learnQueue.filter(c => wordsMatch([c.ko, c.es, c.note], query)) : learnQueue;
   useEffect(() => {
-    if (index > Math.max(0, learnQueue.length - 1)) setIndex(Math.max(0, learnQueue.length - 1));
-  }, [learnQueue.length, index]);
+    if (index > Math.max(0, visibleQueue.length - 1)) setIndex(Math.max(0, visibleQueue.length - 1));
+  }, [visibleQueue.length, index]);
+  useEffect(() => {
+    setIndex(0);
+    setDragX(0);
+  }, [query]);
   if (cards.length === 0) return React.createElement("div", {
     className: "rc-empty"
   }, React.createElement("p", {
@@ -1203,9 +1209,25 @@ function LearnMode({
     className: "rc-cta ghost",
     onClick: goTest
   }, "시험 탭으로 가기"));
-  const card = learnQueue[index];
+  const searchBox = React.createElement("input", {
+    className: "rc-search",
+    value: query,
+    onChange: e => setQuery(e.target.value),
+    placeholder: "학습할 문장 검색 (한국어·스페인어)"
+  });
+  if (visibleQueue.length === 0) return React.createElement("div", {
+    className: "rc-learn"
+  }, searchBox, React.createElement("div", {
+    className: "rc-empty"
+  }, React.createElement("p", {
+    className: "rc-empty-big"
+  }, "검색 결과가 없어요."), React.createElement("button", {
+    className: "rc-cta ghost",
+    onClick: () => setQuery("")
+  }, "검색 지우기")));
+  const card = visibleQueue[index];
   const atStart = index === 0;
-  const atEnd = index === learnQueue.length - 1;
+  const atEnd = index === visibleQueue.length - 1;
   const onPointerDown = e => {
     if (animating) return;
     if (e.target.closest(".rc-speak-btn") || e.target.closest(".rc-reveal-toggle")) return;
@@ -1288,18 +1310,18 @@ function LearnMode({
   const rightArrowOp = 0.3 + (dragX < 0 ? progress * 0.7 : 0);
   return React.createElement("div", {
     className: "rc-learn"
-  }, React.createElement("div", {
+  }, searchBox, React.createElement("div", {
     className: "rc-learn-top"
   }, React.createElement("span", {
     className: "rc-learn-count"
-  }, "학습 중 ", React.createElement("b", null, index + 1), " / ", learnQueue.length), React.createElement("span", {
+  }, "학습 중 ", React.createElement("b", null, index + 1), " / ", visibleQueue.length), React.createElement("span", {
     className: "rc-learn-hint"
   }, "← 스와이프해서 넘겨보세요 →")), React.createElement("div", {
     className: "rc-goalbar-track"
   }, React.createElement("div", {
     className: "rc-goalbar-fill",
     style: {
-      width: `${(index + 1) / learnQueue.length * 100}%`
+      width: `${(index + 1) / visibleQueue.length * 100}%`
     }
   })), React.createElement("div", {
     className: "rc-learn-stack"
@@ -1475,7 +1497,7 @@ const LS_TTS_SPEED = "recall:tts-speed";
 const TTS_VOICE_DEFAULT = "nova";
 const TTS_VOICE_B_DEFAULT = "onyx";
 const TTS_SPEED_DEFAULT = 1.0;
-const TTS_VOICES = [["nova", "Nova", "밝고 또렷함"], ["shimmer", "Shimmer", "부드러운 톤"], ["alloy", "Alloy", "중성적, 무난함"], ["echo", "Echo", "차분한 남성적 톤"], ["fable", "Fable", "표현력 있는 편"], ["onyx", "Onyx", "낮고 굵은 톤"]];
+const TTS_VOICES = [["nova", "Nova", "밝고 또렷함"], ["shimmer", "Shimmer", "부드러운 톤"], ["alloy", "Alloy", "중성적, 무난함"], ["echo", "Echo", "차분한 남성적 톤"], ["fable", "Fable", "표현력 있는 편"], ["onyx", "Onyx", "낮고 굵은 톤"], ["marin", "Marin", "최신 고품질 (OpenAI 추천)"], ["cedar", "Cedar", "최신 고품질 (OpenAI 추천)"]];
 const TTS_SPEEDS = [[0.75, "느리게"], [0.85, "살짝 느리게"], [1.0, "보통"], [1.15, "살짝 빠르게"]];
 const ttsCache = new Map();
 let __activeAudioStop = null;
