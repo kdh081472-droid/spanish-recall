@@ -1609,9 +1609,15 @@ function DialoguePlayButton({
   const voiceFor = speaker => speaker === "B" ? localStorage.getItem(LS_TTS_VOICE_B) || TTS_VOICE_B_DEFAULT : localStorage.getItem(LS_TTS_VOICE) || TTS_VOICE_DEFAULT;
   const playFrom = React.useCallback(async i => {
     if (stoppedRef.current) return;
-    if (i >= lines.length) {
+    if (lines.length === 0) {
       stoppedRef.current = true;
       setState("idle");
+      return;
+    }
+    if (i >= lines.length) {
+      timerRef.current = setTimeout(() => {
+        if (!stoppedRef.current) playFrom(0);
+      }, TTS_LOOP_GAP_MS);
       return;
     }
     const line = lines[i];
@@ -1664,6 +1670,7 @@ function AskResultView({
   phrases
 }) {
   const hasSpeakers = phrases?.some(p => p.speaker === "A" || p.speaker === "B");
+  const dialogueLines = React.useMemo(() => (phrases || []).filter(p => p.es), [phrases]);
   return React.createElement("div", {
     className: "rc-ask-result"
   }, React.createElement("p", {
@@ -1671,7 +1678,7 @@ function AskResultView({
   }, message), phrases && phrases.length > 0 && React.createElement("div", {
     className: "rc-ask-phrases"
   }, hasSpeakers && React.createElement(DialoguePlayButton, {
-    lines: phrases.filter(p => p.es)
+    lines: dialogueLines
   }), hasSpeakers ? React.createElement("div", {
     className: "rc-chat"
   }, phrases.map((p, i) => React.createElement("div", {
@@ -1687,7 +1694,9 @@ function AskResultView({
     className: "rc-chat-es"
   }, p.es), p.pron && React.createElement("div", {
     className: "rc-chat-pron"
-  }, p.pron)), React.createElement(SpeakButton, {
+  }, p.pron), p.ko && React.createElement("div", {
+    className: "rc-chat-ko"
+  }, p.ko)), React.createElement(SpeakButton, {
     text: p.es,
     voiceOverride: p.speaker === "B" ? localStorage.getItem(LS_TTS_VOICE_B) || TTS_VOICE_B_DEFAULT : undefined
   }))))) : React.createElement("div", {
@@ -1703,9 +1712,11 @@ function AskResultView({
     text: p.es
   })), p.pron && React.createElement("div", {
     className: "rc-phrase-pron"
-  }, p.pron))))));
+  }, p.pron), p.ko && React.createElement("div", {
+    className: "rc-phrase-ko"
+  }, p.ko))))));
 }
-function Add({
+const Add = React.memo(function Add({
   cards,
   persist,
   instructions,
@@ -1900,7 +1911,7 @@ function Add({
         body: JSON.stringify({
           model: AI_MODEL,
           max_tokens: 2000,
-          system: "You help a Korean learner of conversational Mexican Spanish inside their personal flashcard app. " + "You're given the sentences they've already saved (Korean = Spanish) as reference context — draw on this vocabulary naturally where it fits, but you're not limited to only these words. " + "The user may ask you anything related to their studying: suggesting things to say to someone, summarizing what they've been practicing, explaining grammar, or writing a short two-person practice dialogue. " + "Respond with ONLY a raw JSON object with exactly two keys: " + '"message" — a natural, conversational Korean-language reply to the request (explanation, suggestion, or a short intro to the phrases/dialogue below). ' + '"phrases" — an array of relevant Spanish expressions, each an object with "es" (the Spanish text), "pron" (Korean-hangul phonetic transcription, Mexican pronunciation), and "speaker". ' + 'If the user asked for a two-person dialogue/conversation, set "speaker" to alternating "A"/"B" for each line in order; otherwise set "speaker" to "". ' + "Use an empty array for phrases if the reply doesn't call for specific Spanish expressions (e.g. a purely informational answer). " + "No markdown fences, no prose outside the JSON object.",
+          system: "You help a Korean learner of conversational Mexican Spanish inside their personal flashcard app. " + "You're given the sentences they've already saved (Korean = Spanish) as reference context — draw on this vocabulary naturally where it fits, but you're not limited to only these words. " + "The user may ask you anything related to their studying: suggesting things to say to someone, summarizing what they've been practicing, explaining grammar, or writing a short two-person practice dialogue. " + "Respond with ONLY a raw JSON object with exactly two keys: " + '"message" — a natural, conversational Korean-language reply to the request (explanation, suggestion, or a short intro to the phrases/dialogue below). ' + '"phrases" — an array of relevant Spanish expressions, each an object with "es" (the Spanish text), "ko" (natural Korean translation of that line), "pron" (Korean-hangul phonetic transcription, Mexican pronunciation), and "speaker". ' + 'If the user asked for a two-person dialogue/conversation, set "speaker" to alternating "A"/"B" for each line in order; otherwise set "speaker" to "". ' + "Use an empty array for phrases if the reply doesn't call for specific Spanish expressions (e.g. a purely informational answer). " + "No markdown fences, no prose outside the JSON object.",
           messages: [{
             role: "user",
             content: (reference ? `[참고: 지금까지 저장한 문장들]\n${reference}\n\n` : "") + `[질문]\n${askText}`
@@ -1921,6 +1932,7 @@ function Add({
       const message = (parsed.message || "").toString();
       const phrases = Array.isArray(parsed.phrases) ? parsed.phrases.map(p => ({
         es: (p.es || "").toString().trim(),
+        ko: (p.ko || "").toString().trim(),
         pron: (p.pron || "").toString().trim(),
         speaker: p.speaker === "A" || p.speaker === "B" ? p.speaker : ""
       })).filter(p => p.es) : [];
@@ -2118,7 +2130,7 @@ function Add({
   }, gridRows.length, "개 등록"))), msg && React.createElement("div", {
     className: "rc-msg"
   }, msg));
-}
+});
 function ListView({
   cards,
   persist,
@@ -2316,7 +2328,7 @@ function ListView({
     }, "삭제"))));
   }));
 }
-function BookmarksView({
+const BookmarksView = React.memo(function BookmarksView({
   bookmarks,
   removeBookmark
 }) {
@@ -2356,8 +2368,8 @@ function BookmarksView({
     message: b.message,
     phrases: b.phrases
   }))));
-}
-function Settings({
+});
+const Settings = React.memo(function Settings({
   target,
   saveTarget,
   dailyGoal,
@@ -2471,7 +2483,7 @@ function Settings({
     mature: mature,
     streak: streak
   }));
-}
+});
 function SettingsApiKeySection() {
   const [key, setKey] = useState(() => localStorage.getItem(LS_API_KEY) || "");
   const [saved, setSaved] = useState(!!localStorage.getItem(LS_API_KEY));
@@ -2945,6 +2957,7 @@ function StyleTag() {
 .rc-phrase-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .rc-phrase-es{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:17px;color:var(--pine);flex:1;line-height:1.35}
 .rc-phrase-pron{margin-top:4px;font-size:12px;color:var(--marigold);font-weight:500}
+.rc-phrase-ko{margin-top:5px;font-size:12px;color:var(--mut)}
 
 .rc-dialogue-play{display:flex;align-items:center;gap:8px}
 .rc-mini.on{background:var(--pine);color:#fff;border-color:var(--pine)}
@@ -2960,6 +2973,7 @@ function StyleTag() {
 .rc-chat-bubble.right .rc-chat-text{background:#eef6f4;border-color:#cfe6e0}
 .rc-chat-es{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:15px;color:var(--pine);line-height:1.35}
 .rc-chat-pron{margin-top:3px;font-size:11px;color:var(--marigold);font-weight:500}
+.rc-chat-ko{margin-top:4px;font-size:11px;color:var(--mut)}
 
 .rc-bookmarks{display:flex;flex-direction:column;gap:16px;padding:18px 0}
 .rc-bookmark-item{border:1px solid var(--line);border-radius:16px;padding:16px;background:var(--surface);
