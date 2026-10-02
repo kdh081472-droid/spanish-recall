@@ -1602,6 +1602,7 @@ function DialoguePlayButton({
 }) {
   const [state, setState] = useState("idle");
   const [msg, setMsg] = useState("");
+  const [prepDone, setPrepDone] = useState(0);
   const audioRef = React.useRef(null);
   const timerRef = React.useRef(null);
   const stoppedRef = React.useRef(true);
@@ -1662,14 +1663,36 @@ function DialoguePlayButton({
       setMsg(e?.message || "중계 서버에 연결하지 못했어요.");
     }
   }, [lines]);
-  const onClick = () => {
-    if (state === "loading") return;
+  const onClick = async () => {
+    if (state === "prep" || state === "loading") return;
     if (state === "playing") {
       stop();
       return;
     }
     stoppedRef.current = false;
     claimAudioPlayback(stop);
+    setMsg("");
+    setPrepDone(0);
+    if (lines.length > 0) {
+      setState("prep");
+      try {
+        let done = 0;
+        await Promise.all(lines.map(async line => {
+          await fetchTtsUrl(line.es, voiceFor(line.speaker));
+          done += 1;
+          setPrepDone(done);
+        }));
+      } catch (e) {
+        if (!stoppedRef.current) {
+          stoppedRef.current = true;
+          setState("error");
+          setMsg(e?.message || "중계 서버에 연결하지 못했어요.");
+          releaseAudioPlayback(stop);
+        }
+        return;
+      }
+    }
+    if (stoppedRef.current) return;
     playFrom(0);
   };
   return React.createElement("div", {
@@ -1678,8 +1701,8 @@ function DialoguePlayButton({
     type: "button",
     className: "rc-mini" + (state === "playing" ? " on" : ""),
     onClick: onClick,
-    disabled: state === "loading"
-  }, state === "loading" ? "…" : state === "playing" ? "■ 멈추기" : "▶ 전체 대화 듣기"), state === "error" && React.createElement("span", {
+    disabled: state === "prep" || state === "loading"
+  }, state === "prep" ? `준비 중… (${prepDone}/${lines.length})` : state === "loading" ? "…" : state === "playing" ? "■ 멈추기" : "▶ 전체 대화 듣기"), state === "error" && React.createElement("span", {
     className: "rc-speak-err"
   }, msg));
 }
