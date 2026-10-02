@@ -1471,6 +1471,14 @@ const TTS_SPEED_DEFAULT = 1.0;
 const TTS_VOICES = [["nova", "Nova", "밝고 또렷함"], ["shimmer", "Shimmer", "부드러운 톤"], ["alloy", "Alloy", "중성적, 무난함"], ["echo", "Echo", "차분한 남성적 톤"], ["fable", "Fable", "표현력 있는 편"], ["onyx", "Onyx", "낮고 굵은 톤"]];
 const TTS_SPEEDS = [[0.75, "느리게"], [0.85, "살짝 느리게"], [1.0, "보통"], [1.15, "살짝 빠르게"]];
 const ttsCache = new Map();
+let __activeAudioStop = null;
+function claimAudioPlayback(stopFn) {
+  if (__activeAudioStop && __activeAudioStop !== stopFn) __activeAudioStop();
+  __activeAudioStop = stopFn;
+}
+function releaseAudioPlayback(stopFn) {
+  if (__activeAudioStop === stopFn) __activeAudioStop = null;
+}
 const TTS_LOOP_GAP_MS = 800;
 async function fetchTtsUrl(text, voiceOverride) {
   const apiKey = (localStorage.getItem(LS_OPENAI_KEY) || "").trim();
@@ -1516,6 +1524,10 @@ function SpeakButton({
   const audioRef = React.useRef(null);
   const timerRef = React.useRef(null);
   const stoppedRef = React.useRef(true);
+  const getAudio = () => {
+    if (!audioRef.current) audioRef.current = new Audio();
+    return audioRef.current;
+  };
   const stop = React.useCallback(() => {
     stoppedRef.current = true;
     if (timerRef.current) {
@@ -1525,14 +1537,14 @@ function SpeakButton({
     if (audioRef.current) {
       audioRef.current.onended = null;
       audioRef.current.pause();
-      audioRef.current.currentTime = 0;
     }
+    releaseAudioPlayback(stop);
     setState("idle");
   }, []);
   useEffect(() => () => stop(), [text, stop]);
   const playOnce = React.useCallback(url => {
-    const audio = new Audio(url);
-    audioRef.current = audio;
+    const audio = getAudio();
+    audio.src = url;
     audio.onended = () => {
       if (stoppedRef.current) return;
       timerRef.current = setTimeout(() => {
@@ -1555,6 +1567,7 @@ function SpeakButton({
         url = await fetchTtsUrl(text, voiceOverride);
       }
       if (stoppedRef.current) return;
+      claimAudioPlayback(stop);
       setState("playing");
       playOnce(url);
     } catch (e) {
@@ -1592,6 +1605,10 @@ function DialoguePlayButton({
   const audioRef = React.useRef(null);
   const timerRef = React.useRef(null);
   const stoppedRef = React.useRef(true);
+  const getAudio = () => {
+    if (!audioRef.current) audioRef.current = new Audio();
+    return audioRef.current;
+  };
   const stop = React.useCallback(() => {
     stoppedRef.current = true;
     if (timerRef.current) {
@@ -1601,8 +1618,8 @@ function DialoguePlayButton({
     if (audioRef.current) {
       audioRef.current.onended = null;
       audioRef.current.pause();
-      audioRef.current.currentTime = 0;
     }
+    releaseAudioPlayback(stop);
     setState("idle");
   }, []);
   useEffect(() => () => stop(), [lines, stop]);
@@ -1626,8 +1643,8 @@ function DialoguePlayButton({
       const url = await fetchTtsUrl(line.es, voiceFor(line.speaker));
       if (stoppedRef.current) return;
       setState("playing");
-      const audio = new Audio(url);
-      audioRef.current = audio;
+      const audio = getAudio();
+      audio.src = url;
       audio.onended = () => {
         if (stoppedRef.current) return;
         timerRef.current = setTimeout(() => {
@@ -1652,6 +1669,7 @@ function DialoguePlayButton({
       return;
     }
     stoppedRef.current = false;
+    claimAudioPlayback(stop);
     playFrom(0);
   };
   return React.createElement("div", {
