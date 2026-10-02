@@ -772,6 +772,12 @@ function App() {
   const removeBookmark = useCallback(id => persistMeta({
     bookmarks: bookmarks.filter(b => b.id !== id)
   }), [persistMeta, bookmarks]);
+  const renameBookmark = useCallback((id, title) => persistMeta({
+    bookmarks: bookmarks.map(b => b.id === id ? {
+      ...b,
+      title
+    } : b)
+  }), [persistMeta, bookmarks]);
   const recordGood = useCallback(cardId => {
     const today = todayStr();
     const base = goalDate === today ? goalIds : [];
@@ -1006,7 +1012,8 @@ function App() {
     now: now
   }) : tab === "bookmarks" ? React.createElement(BookmarksView, {
     bookmarks: bookmarks,
-    removeBookmark: removeBookmark
+    removeBookmark: removeBookmark,
+    renameBookmark: renameBookmark
   }) : React.createElement(Settings, {
     target: target,
     saveTarget: saveTarget,
@@ -1968,7 +1975,7 @@ const Add = React.memo(function Add({
         body: JSON.stringify({
           model: AI_MODEL,
           max_tokens: 2000,
-          system: "You help a Korean learner of conversational Mexican Spanish inside their personal flashcard app. " + "You're given the sentences they've already saved (Korean = Spanish) as reference context — draw on this vocabulary naturally where it fits, but you're not limited to only these words. " + "The user may ask you anything related to their studying: suggesting things to say to someone, summarizing what they've been practicing, explaining grammar, or writing a short two-person practice dialogue. " + "The conversation may include a JSON reply you gave earlier, followed by a follow-up request to revise it (e.g. swap who says what, change a line, make it shorter) — make the requested change and reply with the complete updated object again, same schema, not just the diff. " + "Respond with ONLY a raw JSON object with exactly two keys: " + '"message" — a natural, conversational Korean-language reply to the request (explanation, suggestion, or a short intro to the phrases/dialogue below). ' + '"phrases" — an array of relevant Spanish expressions, each an object with "es" (the Spanish text), "ko" (natural Korean translation of that line), "pron" (Korean-hangul phonetic transcription, Mexican pronunciation), and "speaker". ' + 'If the user asked for a two-person dialogue/conversation, set "speaker" to alternating "A"/"B" for each line in order; otherwise set "speaker" to "". ' + "Use an empty array for phrases if the reply doesn't call for specific Spanish expressions (e.g. a purely informational answer). " + "No markdown fences, no prose outside the JSON object.",
+          system: "You help a Korean learner of conversational Mexican Spanish inside their personal flashcard app. " + "You're given the sentences they've already saved (Korean = Spanish) as reference context — draw on this vocabulary naturally where it fits, but you're not limited to only these words. " + "The user may ask you anything related to their studying: suggesting things to say to someone, summarizing what they've been practicing, explaining grammar, or writing a short two-person practice dialogue. " + "The conversation may include a JSON reply you gave earlier, followed by a follow-up request to revise it (e.g. swap who says what, change a line, make it shorter) — make the requested change and reply with the complete updated object again, same schema, not just the diff. " + "Respond with ONLY a raw JSON object with exactly three keys: " + '"title" — a very short Korean label (under 15 characters) summarizing the topic, e.g. "카페 주문 대화" or "몬세에게 할 말 추천" — this is used as a list item name, not a sentence. ' + '"message" — a natural, conversational Korean-language reply to the request (explanation, suggestion, or a short intro to the phrases/dialogue below). ' + '"phrases" — an array of relevant Spanish expressions, each an object with "es" (the Spanish text), "ko" (natural Korean translation of that line), "pron" (Korean-hangul phonetic transcription, Mexican pronunciation), and "speaker". ' + 'If the user asked for a two-person dialogue/conversation, set "speaker" to alternating "A"/"B" for each line in order; otherwise set "speaker" to "". ' + "Use an empty array for phrases if the reply doesn't call for specific Spanish expressions (e.g. a purely informational answer). " + "No markdown fences, no prose outside the JSON object.",
           messages
         })
       });
@@ -1983,6 +1990,7 @@ const Add = React.memo(function Add({
       if (!textBlock) throw new Error("응답에서 결과를 찾지 못했어요.");
       const cleaned = textBlock.text.trim().replace(/^```json\s*|^```\s*|```$/g, "");
       const parsed = JSON.parse(cleaned);
+      const title = (parsed.title || "").toString().trim();
       const message = (parsed.message || "").toString();
       const phrases = Array.isArray(parsed.phrases) ? parsed.phrases.map(p => ({
         es: (p.es || "").toString().trim(),
@@ -1993,6 +2001,7 @@ const Add = React.memo(function Add({
       if (!message && !phrases.length) throw new Error("응답을 이해하지 못했어요.");
       setAskResult({
         id: uid(),
+        title: title || askText.slice(0, 20),
         question: askText,
         message,
         phrases,
@@ -2406,46 +2415,116 @@ function ListView({
     }, "삭제"))));
   }));
 }
+function bookmarkTitle(b) {
+  return b.title || b.question || "제목 없음";
+}
+function bookmarkMatches(b, q) {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  const hay = [bookmarkTitle(b), b.question || "", b.message || "", ...(b.phrases || []).flatMap(p => [p.es || "", p.ko || ""])].join(" ").toLowerCase();
+  return hay.includes(needle);
+}
 const BookmarksView = React.memo(function BookmarksView({
   bookmarks,
-  removeBookmark
+  removeBookmark,
+  renameBookmark
 }) {
   const [confirmId, setConfirmId] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [query, setQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState("newest");
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameDraft, setRenameDraft] = useState("");
   if (bookmarks.length === 0) return React.createElement("div", {
     className: "rc-empty"
   }, React.createElement("p", {
     className: "rc-empty-big"
   }, "아직 북마크한 게 없어요."), React.createElement("p", null, "추가 탭의 \"AI에게 물어보기\"에서 받은 답변을 북마크하면 여기 쌓여요."));
-  const sorted = [...bookmarks].sort((a, b) => b.created - a.created);
+  const filtered = bookmarks.filter(b => bookmarkMatches(b, query));
+  const sorted = [...filtered].sort((a, b) => sortOrder === "newest" ? b.created - a.created : a.created - b.created);
+  const startRename = b => {
+    setRenamingId(b.id);
+    setRenameDraft(bookmarkTitle(b));
+  };
+  const saveRename = id => {
+    const t = renameDraft.trim();
+    if (t) renameBookmark(id, t);
+    setRenamingId(null);
+  };
   return React.createElement("div", {
     className: "rc-bookmarks"
-  }, sorted.map(b => React.createElement("div", {
-    key: b.id,
-    className: "rc-bookmark-item"
   }, React.createElement("div", {
-    className: "rc-bookmark-head"
-  }, React.createElement("div", null, React.createElement("div", {
-    className: "rc-bookmark-q"
-  }, b.question), React.createElement("div", {
-    className: "rc-bookmark-date"
-  }, new Date(b.created).toLocaleDateString("ko-KR"))), confirmId === b.id ? React.createElement("div", {
-    className: "rc-file-actions"
+    className: "rc-bookmark-controls"
+  }, React.createElement("input", {
+    className: "rc-bookmark-search",
+    value: query,
+    onChange: e => setQuery(e.target.value),
+    placeholder: "제목·한국어·스페인어로 검색"
+  }), React.createElement("div", {
+    className: "rc-seg rc-bookmark-sort"
   }, React.createElement("button", {
-    className: "rc-mini danger",
-    onClick: () => {
-      removeBookmark(b.id);
-      setConfirmId(null);
+    className: sortOrder === "newest" ? "on" : "",
+    onClick: () => setSortOrder("newest")
+  }, "최신순"), React.createElement("button", {
+    className: sortOrder === "oldest" ? "on" : "",
+    onClick: () => setSortOrder("oldest")
+  }, "오래된순"))), sorted.length === 0 && React.createElement("p", {
+    className: "rc-p rc-p-mut",
+    style: {
+      padding: "0 2px"
     }
-  }, "삭제 확인"), React.createElement("button", {
-    className: "rc-mini ghost",
-    onClick: () => setConfirmId(null)
-  }, "취소")) : React.createElement("button", {
-    className: "rc-mini danger",
-    onClick: () => setConfirmId(b.id)
-  }, "삭제")), React.createElement(AskResultView, {
-    message: b.message,
-    phrases: b.phrases
-  }))));
+  }, "검색 결과가 없어요."), sorted.map(b => {
+    const isOpen = openId === b.id;
+    const isRenaming = renamingId === b.id;
+    return React.createElement("div", {
+      key: b.id,
+      className: "rc-bookmark-item"
+    }, React.createElement("div", {
+      className: "rc-bookmark-head"
+    }, isRenaming ? React.createElement("div", {
+      className: "rc-bookmark-rename-row"
+    }, React.createElement("input", {
+      className: "rc-bookmark-rename-input",
+      value: renameDraft,
+      onChange: e => setRenameDraft(e.target.value),
+      autoFocus: true
+    }), React.createElement("button", {
+      className: "rc-mini",
+      onClick: () => saveRename(b.id)
+    }, "저장"), React.createElement("button", {
+      className: "rc-mini ghost",
+      onClick: () => setRenamingId(null)
+    }, "취소")) : React.createElement("button", {
+      className: "rc-bookmark-title-btn",
+      onClick: () => setOpenId(isOpen ? null : b.id)
+    }, React.createElement("span", {
+      className: "rc-bookmark-caret"
+    }, isOpen ? "▾" : "▸"), React.createElement("div", null, React.createElement("div", {
+      className: "rc-bookmark-q"
+    }, bookmarkTitle(b)), React.createElement("div", {
+      className: "rc-bookmark-date"
+    }, new Date(b.created).toLocaleDateString("ko-KR")))), !isRenaming && React.createElement("div", {
+      className: "rc-file-actions"
+    }, React.createElement("button", {
+      className: "rc-mini ghost",
+      onClick: () => startRename(b)
+    }, "이름 수정"), confirmId === b.id ? React.createElement(React.Fragment, null, React.createElement("button", {
+      className: "rc-mini danger",
+      onClick: () => {
+        removeBookmark(b.id);
+        setConfirmId(null);
+      }
+    }, "삭제 확인"), React.createElement("button", {
+      className: "rc-mini ghost",
+      onClick: () => setConfirmId(null)
+    }, "취소")) : React.createElement("button", {
+      className: "rc-mini danger",
+      onClick: () => setConfirmId(b.id)
+    }, "삭제"))), isOpen && React.createElement(AskResultView, {
+      message: b.message,
+      phrases: b.phrases
+    }));
+  }));
 });
 const Settings = React.memo(function Settings({
   target,
@@ -3054,11 +3133,23 @@ function StyleTag() {
 .rc-chat-ko{margin-top:4px;font-size:11px;color:var(--mut)}
 
 .rc-bookmarks{display:flex;flex-direction:column;gap:16px;padding:18px 0}
+.rc-bookmark-controls{display:flex;flex-direction:column;gap:8px;margin-bottom:4px}
+.rc-bookmark-search{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+  font:inherit;font-size:13px;background:var(--surface);color:var(--ink);box-sizing:border-box}
+.rc-bookmark-search:focus{outline:2px solid var(--marigold);outline-offset:-1px;border-color:transparent}
+.rc-bookmark-sort{margin-bottom:0}
+.rc-bookmark-sort button{flex:1}
 .rc-bookmark-item{border:1px solid var(--line);border-radius:16px;padding:16px;background:var(--surface);
   display:flex;flex-direction:column;gap:14px}
-.rc-bookmark-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.rc-bookmark-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.rc-bookmark-title-btn{display:flex;align-items:flex-start;gap:8px;background:none;border:none;padding:0;
+  cursor:pointer;text-align:left;flex:1;min-width:0}
+.rc-bookmark-caret{color:var(--mut);font-size:13px;line-height:1.5;flex:none}
 .rc-bookmark-q{font-size:14px;font-weight:700;color:var(--ink);line-height:1.4}
 .rc-bookmark-date{margin-top:3px;font-size:11px;color:var(--mut)}
+.rc-bookmark-rename-row{display:flex;align-items:center;gap:8px;flex:1}
+.rc-bookmark-rename-input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:9px;
+  font:inherit;font-size:14px;background:var(--paper);color:var(--ink)}
 .rc-mini.danger{color:var(--clay);border-color:var(--clay)}
 .rc-tts-input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
   font:inherit;font-size:13px;background:var(--surface);color:var(--ink)}
